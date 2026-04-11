@@ -86,13 +86,4 @@ pip install -r requirements.txt
 - Análisis de correlación glaciar-caudal.
 - Proyección simplificada.
 
-## Licencia
-
-Este proyecto está bajo dos licencias:
-
-- **Código fuente**: [MIT License](LICENSE) – libertad total con atribución.
-- **Mapas, gráficos e informe**: [Creative Commons BY 4.0](https://creativecommons.org/licenses/by/4.0/) – se permite compartir y adaptar con crédito.
-
----
-
 *“El hielo se va, pero nosotros permaneceremos. Debemos cuidar nuestros recursos hídricos”*
