@@ -1,8 +1,7 @@
 # 🧊 geo_IceAgen-t
 
-[![Licencia MIT](https://img.shields.io/badge/Licencia-MIT-yellow.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
-[![Geoespacial](https://img.shields.io/badge/Geoespacial-Desafío%205-green)](https://github.com/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-yellow.svg)](https://www.python.org/)
+[![Geoespacial](https://img.shields.io/badge/Geoespacial-Desafío%205-red)](https://github.com/)
 
 ## Datos generales
 
@@ -36,16 +35,27 @@ Este repositorio corresponde al **Desafío 5** del curso *Geoinformática* (Univ
 | Folium            | Mapas interactivos                       |
 | Contextily        | Mapas base en tiles                      |
 | Jupyter Notebook  | Desarrollo interactivo y documentado     |
+| Docker            | Para aislar el entorno                   |
 
 ## Estructura del repositorio
 
 Los directorios se explican mejor en READMEs dentro de cada directorio. Pero en resumen:
 
-- `code/` Contiene todos los archivos de código.
-- `document/` Contiene todo lo relacionado al informe correspondiente.
-- `LICENSE` y `README.md` en la raíz.
+- `app/` Contiene la aplicación web para mostrar el dashboard.
+- `data/` Contiene los datos a utilizar, ya sea crudos, procesados o de fuentes externas.
+- `docker/` Cuenta con las imagenes y scripts de la dockerización.
+- `outputs/` Cuenta con los resultados del proyecto.
+- `scripts/` Cuenta con los scripts de apoyo para el proyecto.
 
-## Instalación
+Archivos en este directorio:
+- `.gitignore` Excluye los archivos pesados como rasteres etc.
+- `docker-compose.yml` Orquesta los contenedores.
+- `README.md` Describe el proyecto (es este archivo).
+- `requirements.txt` Dependencias para ejecutar el proyecto.
+- `setup.sh` Automatiza la ejecución del proyecto.
+
+
+## Instalación para desarrollo
 
 ### 1. Clona el repositorio con
 ```bash
@@ -54,15 +64,15 @@ git clone git@github.com:Ch3chS/geo_IceAgen-t.git
 ### 2. Entra a la carpeta del código:
 
 ```bash
-cd geo_IceAgen-t/code
+cd geo_IceAgen-t
 ```
 ### 3. Crea un entorno virtual:
 ```bash
-python -m venv geo_env
+python -m venv .env
 ```
 ### 4. Entra al entorno virtual:
 ```bash
-source ./geo_env/bin/activate
+source ./.env/bin/activate
 ```
 ### 5. Instala las dependencias:
 ```bash

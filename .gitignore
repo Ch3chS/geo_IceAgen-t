@@ -1,5 +1,2 @@
 # Entorno virtual local
-/code/geo_env
-
-# Archivos de construcción latex
-/document/build
+/.env
