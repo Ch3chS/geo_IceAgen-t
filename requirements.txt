@@ -4,3 +4,10 @@ matplotlib==3.10.8
 rasterio==1.5.0
 contextily==1.7.0
 jupyter==1.1.1
+requests
+s3fs
+fabdem
+pystac-client
+shapely
+tqdm
+planetary-computer
