@@ -238,11 +238,44 @@ def descargar_dem():
         logging.info("FABDEM ya existe, omitiendo")
         return
     try:
-        fabdem.download(BOUNDS, output_path=str(out_path), show_progress=True)
-        logging.info(f"DEM guardado en {out_path}")
+        import rasterio
+        from rasterio.merge import merge as rio_merge
+
+        # Descargar con fabdem (ignora el error del merge interno)
+        try:
+            fabdem.download(BOUNDS, output_path=str(out_path), show_progress=True)
+        except TypeError:
+            pass  # El error de merge() es esperado, los tiles ya están en caché
+
+        # Buscar tiles en la caché de fabdem
+        cache_dir = Path("/tmp/fabdem-cache")
+        tiles = sorted(cache_dir.glob("**/*.tif"))
+        if not tiles:
+            raise Exception("No se encontraron tiles en caché de FABDEM")
+
+        logging.info(f"Mergeando {len(tiles)} tiles manualmente...")
+        datasets = [rasterio.open(t) for t in tiles]
+        mosaic, transform = rio_merge(datasets)
+
+        profile = datasets[0].profile.copy()
+        profile.update({
+            "height":    mosaic.shape[1],
+            "width":     mosaic.shape[2],
+            "transform": transform,
+            "compress":  "lzw"
+        })
+
+        with rasterio.open(out_path, 'w', **profile) as dst:
+            dst.write(mosaic)
+
+        for ds in datasets:
+            ds.close()
+
+        logging.info(f"DEM guardado en {out_path} ({out_path.stat().st_size / 1e6:.1f} MB)")
+
     except Exception as e:
         logging.error(f"Error descargando FABDEM: {e}")
-
+        
 # ============================================================================
 # MAIN
 # ============================================================================
