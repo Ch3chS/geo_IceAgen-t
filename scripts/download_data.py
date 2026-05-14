@@ -37,7 +37,9 @@ for d in [SENTINEL_DIR, LANDSAT_DIR, DEM_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 # Área de estudio (Andes, Chile central, glaciares)
-BOUNDS      = (-72.0, -37.0, -68.0, -29.0)
+# BOUNDS      = (-72.0, -37.0, -68.0, -29.0)
+BOUNDS = (-70.25, -33.65, -70.05, -33.50)
+
 AOI_POLYGON = box(*BOUNDS)
 
 # Fechas
@@ -282,8 +284,8 @@ def descargar_dem():
 def main():
     logging.info("===== INICIANDO DESCARGA POR DATASET =====")
     descargar_sentinel2()   # Comenta si no quieres Sentinel-2
-    descargar_landsat()     # Comenta si no quieres Landsat
-    descargar_dem()        # Comenta si no quieres DEM
+    # descargar_landsat()     # Comenta si no quieres Landsat
+    # descargar_dem()        # Comenta si no quieres DEM
     logging.info("===== DESCARGA COMPLETADA =====")
 
 if __name__ == "__main__":
