@@ -54,8 +54,19 @@ Archivos en este directorio:
 - `requirements.txt` Dependencias para ejecutar el proyecto.
 - `setup.sh` Automatiza la ejecución del proyecto.
 
+## Instalación y ejecución automática (recomendada)
 
-## Instalación para desarrollo
+El proyecto incluye un script `setup.sh` que orquesta todo el flujo de principio a fin, solo copia y pega lo siguiente (en linux):
+
+```bash
+git clone git@github.com:Ch3chS/geo_IceAgen-t.git
+cd geo_IceAgen-t
+chmod +x setup.sh
+./setup.sh
+```
+
+
+## Instalación para desarrollo (manual)
 
 ### 1. Clona el repositorio con
 ```bash
@@ -78,6 +89,16 @@ source ./.env/bin/activate
 ```bash
 pip install -r requirements.txt
 ```
+
+### 6. Desarrolla y testea
+ya sea creación de archivos nuevos, depuración etc...
+
+### 7. Verifica el funcionamiento de la aplicación central
+Antes de hacer tu push ejecuta:
+```bash
+streamlit run ./app/main.py
+```
+desde la raiz del proyecto.
 
 ## Resultados esperados
 

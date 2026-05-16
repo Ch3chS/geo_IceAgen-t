@@ -11,3 +11,4 @@ pystac-client
 shapely
 tqdm
 planetary-computer
+streamlit
