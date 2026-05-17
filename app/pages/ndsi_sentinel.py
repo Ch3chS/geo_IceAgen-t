@@ -10,7 +10,7 @@ import re
 # Configuración de la página (debe ir al inicio, pero como esto es un módulo, se llama desde main.py)
 # En main.py ya se define set_page_config. Aquí solo aplicamos estilos adicionales si se desea.
 
-def run_ndsi_dashboard():
+def run_ndsi_sentinel():
     # Ocultar el espacio superior con CSS personalizado (opcional)
     st.markdown("""
         <style>

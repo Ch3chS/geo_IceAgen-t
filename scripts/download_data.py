@@ -12,7 +12,7 @@ import time
 import threading
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests
 import fabdem
@@ -53,6 +53,12 @@ TIMEOUT     = 120
 MAX_WORKERS = 8
 BLOCK_SIZE  = 1024 * 1024  # 1 MB
 
+# Nuevos parámetros para consistencia temporal (mejoras)
+TARGET_DAY = 26          # 26 de Enero
+DAYS_WINDOW = 45         # ventana de ±90 días alrededor
+MAX_CLOUD_COVER = 30     # porcentaje máximo de nubosidad (más estricto)
+MAX_ITEMS_PER_YEAR = 3   # número de escenas a descargar por año (para tener alternativas)
+
 # ============================================================================
 # SESSION POR HILO
 # ============================================================================
@@ -70,44 +76,60 @@ def get_session():
     return _thread_local.session
 
 # ============================================================================
-# BÚSQUEDA AÑO POR AÑO
+# BÚSQUEDA AÑO POR AÑO CON VENTANA FIJA (CORREGIDA ZONA HORARIA)
 # ============================================================================
-def buscar_items_por_año(catalog, collection, start_year, end_year, max_por_año=1):
+def buscar_items_por_año(catalog, collection, start_year, end_year, target_day=60, days_window=45):
     """
-    Busca items año por año para asegurar cobertura histórica completa.
-    Cubre verano austral: diciembre del año anterior + enero/febrero/marzo del año.
+    Busca items año por año dentro de una ventana fija centrada en `target_day` (día juliano).
+    Retorna hasta MAX_ITEMS_PER_YEAR escenas ordenadas por cercanía a la fecha objetivo y nubosidad.
     """
     todos = []
     for year in range(start_year, end_year + 1):
-        ranges = [
-            f"{year-1}-12-01/{year-1}-12-31",
-            f"{year}-01-01/{year}-03-31",
-        ]
-        items_año = []
-        for rango in ranges:
-            try:
-                search = catalog.search(
-                    collections=[collection],
-                    bbox=BOUNDS,
-                    datetime=rango,
-                    query={"eo:cloud_cover": {"lt": 50}},
-                    max_items=20
-                )
-                items_año.extend(list(search.items()))
-            except Exception as e:
-                logging.warning(f"Error buscando {collection} en {rango}: {e}")
+        # Calcular fecha objetivo (1 de marzo del año actual)
+        target_date = datetime(year, 3, 1)
+        start_date = target_date - timedelta(days=days_window)
+        end_date   = target_date + timedelta(days=days_window)
+        date_range = f"{start_date.strftime('%Y-%m-%d')}/{end_date.strftime('%Y-%m-%d')}"
 
-        if items_año:
-            mejores = sorted(
-                items_año,
-                key=lambda x: x.properties.get('eo:cloud_cover', 100)
-            )[:max_por_año]
-            todos.extend(mejores)
-            logging.info(f"  {year}: {len(mejores)} escena(s) "
-                         f"(nubes: {mejores[0].properties.get('eo:cloud_cover', '?'):.1f}%)")
-        else:
-            logging.warning(f"  {year}: sin imágenes limpias disponibles")
+        try:
+            search = catalog.search(
+                collections=[collection],
+                bbox=BOUNDS,
+                datetime=date_range,
+                query={"eo:cloud_cover": {"lt": MAX_CLOUD_COVER}},
+                max_items=20
+            )
+            items = list(search.items())
+        except Exception as e:
+            logging.warning(f"Error buscando {collection} para {year}: {e}")
+            continue
 
+        if not items:
+            logging.warning(f"  {year}: sin imágenes limpias en ventana {date_range}")
+            continue
+
+        # Ordenar por: cercanía a target_date (abs(delta días)) y luego nubosidad
+        def score(item):
+            dt = item.datetime
+            if dt is None:
+                return (float('inf'), 100)
+            # Convertir target_date a timezone-aware si dt tiene zona horaria
+            if dt.tzinfo is not None:
+                target_date_aware = target_date.replace(tzinfo=dt.tzinfo)
+            else:
+                target_date_aware = target_date
+            delta_days = abs((dt - target_date_aware).days)
+            cloud = item.properties.get('eo:cloud_cover', 100)
+            return (delta_days, cloud)
+
+        mejores = sorted(items, key=score)[:MAX_ITEMS_PER_YEAR]
+        todos.extend(mejores)
+
+        # Logging informativo
+        for it in mejores:
+            fecha_str = it.datetime.strftime('%Y-%m-%d') if it.datetime else 'desconocida'
+            nubes = it.properties.get('eo:cloud_cover', '?')
+            logging.info(f"  {year}: seleccionada escena del {fecha_str} (nubes: {nubes}%)")
     return todos
 
 # ============================================================================
@@ -184,8 +206,9 @@ def descargar_sentinel2():
         modifier=planetary_computer.sign_inplace
     )
     items = buscar_items_por_año(catalog, "sentinel-2-l2a",
-                                  start_year=2016, end_year=2024, max_por_año=1)
-    años_cubiertos = len(set(i.datetime.year for i in items))
+                                  start_year=2016, end_year=2024,
+                                  target_day=60, days_window=DAYS_WINDOW)
+    años_cubiertos = len(set(i.datetime.year for i in items if i.datetime))
     logging.info(f"Seleccionadas {len(items)} escenas Sentinel-2 ({años_cubiertos} años cubiertos)")
     if not items:
         logging.warning("No se encontraron imágenes Sentinel-2")
@@ -212,8 +235,9 @@ def descargar_landsat():
         modifier=planetary_computer.sign_inplace
     )
     items = buscar_items_por_año(catalog, "landsat-c2-l2",
-                                  start_year=1984, end_year=2024, max_por_año=1)
-    años_cubiertos = len(set(i.datetime.year for i in items))
+                                  start_year=1985, end_year=2026,
+                                  target_day=60, days_window=DAYS_WINDOW)
+    años_cubiertos = len(set(i.datetime.year for i in items if i.datetime))
     logging.info(f"Seleccionadas {len(items)} escenas Landsat ({años_cubiertos} años cubiertos)")
     if not items:
         logging.warning("No se encontraron escenas Landsat")
@@ -284,7 +308,7 @@ def descargar_dem():
 def main():
     logging.info("===== INICIANDO DESCARGA POR DATASET =====")
     descargar_sentinel2()   # Comenta si no quieres Sentinel-2
-    # descargar_landsat()     # Comenta si no quieres Landsat
+    descargar_landsat()     # Comenta si no quieres Landsat
     # descargar_dem()        # Comenta si no quieres DEM
     logging.info("===== DESCARGA COMPLETADA =====")
 

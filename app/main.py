@@ -7,7 +7,7 @@ st.set_page_config(page_title="IceAgen't", layout="wide")
 st.sidebar.title("Navegación")
 opcion = st.sidebar.radio(
     "Elige un dashboard:",
-    ("Inicio", "NDSI Glaciar Echaurren", "Otro dashboard (próximamente)")
+    ("Inicio", "NDSI Sentinel-2", "NDSI Landsat")
 )
 
 # Mostrar el dashboard seleccionado
@@ -15,14 +15,18 @@ if opcion == "Inicio":
     st.markdown("""
     # Bienvenido al hub de dashboards de IceAgen't
     
-    Utiliza el menú lateral para acceder a los diferentes dashboards disponibles.
+    Utiliza el menu lateral para acceder a los diferentes dashboards.
     
-    - **NDSI Glaciar Echaurren**: Visualización del índice NDSI a partir de imágenes Sentinel-2 procesadas.
-    - (Más dashboards se irán agregando)
+    - **NDSI Sentinel-2**: Visualizacion del indice NDSI a partir de imagenes Sentinel-2 procesadas (2016-2024).
+    - **NDSI Landsat**: Visualizacion del indice NDSI a partir de imagenes Landsat procesadas (1985-2026).
     """)
-elif opcion == "NDSI Glaciar Echaurren":
-    # Importar y ejecutar el dashboard NDSI
-    from dashboards.ndsi_dashboard import run_ndsi_dashboard
-    run_ndsi_dashboard()
+
+elif opcion == "NDSI Sentinel-2":
+    from pages.ndsi_sentinel import run_ndsi_sentinel
+    run_ndsi_sentinel()
+elif opcion == "NDSI Landsat":
+    from pages.ndsi_landsat import run_ndsi_landsat
+    run_ndsi_landsat()
 else:
     st.info("Próximamente: nuevos dashboards para análisis glaciar.")
+
