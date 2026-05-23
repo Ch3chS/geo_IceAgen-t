@@ -38,7 +38,7 @@ for d in [SENTINEL_DIR, LANDSAT_DIR, DEM_DIR]:
 
 # Área de estudio (Andes, Chile central, glaciares)
 # BOUNDS      = (-72.0, -37.0, -68.0, -29.0)
-BOUNDS = (-70.25, -33.65, -70.05, -33.50)
+BOUNDS = (-70.15, -33.60, -70.11, -33.56)
 
 AOI_POLYGON = box(*BOUNDS)
 
@@ -301,12 +301,107 @@ def descargar_dem():
 
     except Exception as e:
         logging.error(f"Error descargando FABDEM: {e}")
+
+def obtener_rango_años_input():
+    """
+    Pide al usuario que ingrese un año o un rango de años por consola.
+    Retorna una tupla (start_year, end_year).
+    """
+    print("\n" + "="*50)
+    print("MODO DEBUG: SELECCIÓN DE AÑOS")
+    print("Puedes ingresar un solo año (ej. 2020) o un rango (ej. 2018-2021).")
+    print("="*50)
+    
+    entrada = input("Ingresa tu elección: ").strip()
+    
+    try:
+        if "-" in entrada:
+            inicio, fin = entrada.split("-")
+            return int(inicio.strip()), int(fin.strip())
+        else:
+            año = int(entrada)
+            return año, año
+    except ValueError:
+        logging.error("Entrada inválida. Fallback al año 2020 por defecto.")
+        return 2020, 2020
+
+def descargar_sentinel2_debug(start_year, end_year):
+    """Versión debug de descargar_sentinel2 que acepta rango de años por parámetro."""
+    logging.info(f"=== DESCARGANDO SENTINEL-2 (DEBUG: {start_year} - {end_year}) ===")
+    catalog = Client.open(
+        "https://planetarycomputer.microsoft.com/api/stac/v1",
+        modifier=planetary_computer.sign_inplace
+    )
+    items = buscar_items_por_año(catalog, "sentinel-2-l2a",
+                                  start_year=start_year, end_year=end_year,
+                                  target_day=60, days_window=DAYS_WINDOW)
+    
+    años_cubiertos = len(set(i.datetime.year for i in items if i.datetime))
+    logging.info(f"Seleccionadas {len(items)} escenas Sentinel-2 ({años_cubiertos} años cubiertos)")
+    if not items:
+        logging.warning("No se encontraron imágenes Sentinel-2 en este rango.")
+        return
+
+    tareas = []
+    for item in items:
+        for band in ['B03', 'B04', 'B08', 'B11']:
+            if band in item.assets:
+                url = item.assets[band].href
+                out_file = SENTINEL_DIR / f"{item.id}_{band}.tif"
+                tareas.append((url, out_file))
+
+    logging.info(f"Generadas {len(tareas)} tareas de descarga (B03, B04, B08, B11)")
+    descargar_concurrente(tareas)
+
+def descargar_landsat_debug(start_year, end_year):
+    """Versión debug de descargar_landsat que acepta rango de años por parámetro."""
+    logging.info(f"=== DESCARGANDO LANDSAT (DEBUG: {start_year} - {end_year}) ===")
+    catalog = Client.open(
+        "https://planetarycomputer.microsoft.com/api/stac/v1",
+        modifier=planetary_computer.sign_inplace
+    )
+    items = buscar_items_por_año(catalog, "landsat-c2-l2",
+                                  start_year=start_year, end_year=end_year,
+                                  target_day=60, days_window=DAYS_WINDOW)
+    
+    años_cubiertos = len(set(i.datetime.year for i in items if i.datetime))
+    logging.info(f"Seleccionadas {len(items)} escenas Landsat ({años_cubiertos} años cubiertos)")
+    if not items:
+        logging.warning("No se encontraron escenas Landsat en este rango.")
+        return
+
+    tareas = []
+    for item in items:
+        for band in ['green', 'red', 'nir08', 'swir16']:
+            if band in item.assets:
+                url = item.assets[band].href
+                out_file = LANDSAT_DIR / f"{item.id}_{band}.tif"
+                tareas.append((url, out_file))
+
+    logging.info(f"Generadas {len(tareas)} tareas de descarga (green, red, nir08, swir16)")
+    descargar_concurrente(tareas)
+
+def ejecutar_debug():
+    """
+    Función orquestadora del modo debug.
+    Llama al input y luego ejecuta las descargas con los años ingresados.
+    """
+    start_year, end_year = obtener_rango_años_input()
+    
+    # Comenta o descomenta según el satélite que quieras debugear
+    # descargar_sentinel2_debug(start_year, end_year)
+    descargar_landsat_debug(start_year, end_year)
         
 # ============================================================================
 # MAIN
 # ============================================================================
 def main():
     logging.info("===== INICIANDO DESCARGA POR DATASET =====")
+
+    # --- MODO DEBUG ---
+    # ejecutar_debug()
+
+    # --- MODO NORMAL ---
     descargar_sentinel2()   # Comenta si no quieres Sentinel-2
     descargar_landsat()     # Comenta si no quieres Landsat
     # descargar_dem()        # Comenta si no quieres DEM

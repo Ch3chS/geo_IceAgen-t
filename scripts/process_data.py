@@ -34,7 +34,8 @@ for d in [PROC_SENTINEL_DIR, PROC_LANDSAT_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 # Área del glaciar Echaurren en UTM 19S (EPSG:32719)
-AOI_BOUNDS = (392500, 6280500, 397500, 6285500)  # (minx, miny, maxx, maxy)
+AOI_BOUNDS = (393150, 6282300, 396200, 6285350)
+# AOI_BOUNDS = (392500, 6280500, 397500, 6285500)  # (minx, miny, maxx, maxy)
 AOI_CRS = 'EPSG:32719'
 
 # ============================================================================
