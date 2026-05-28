@@ -54,8 +54,9 @@ MAX_WORKERS = 8
 BLOCK_SIZE  = 1024 * 1024  # 1 MB
 
 # Nuevos parámetros para consistencia temporal (mejoras)
-TARGET_DAY = 26          # 26 de Enero
-DAYS_WINDOW = 45         # ventana de ±90 días alrededor
+TARGET_DAY = 26     # 26
+TARGET_MONTH = 1    # enero
+DAYS_WINDOW = 45         # ventana de ±45 días alrededor
 MAX_CLOUD_COVER = 30     # porcentaje máximo de nubosidad (más estricto)
 MAX_ITEMS_PER_YEAR = 3   # número de escenas a descargar por año (para tener alternativas)
 
@@ -85,8 +86,7 @@ def buscar_items_por_año(catalog, collection, start_year, end_year, target_day=
     """
     todos = []
     for year in range(start_year, end_year + 1):
-        # Calcular fecha objetivo (1 de marzo del año actual)
-        target_date = datetime(year, 3, 1)
+        target_date = datetime(year, TARGET_MONTH, TARGET_DAY)
         start_date = target_date - timedelta(days=days_window)
         end_date   = target_date + timedelta(days=days_window)
         date_range = f"{start_date.strftime('%Y-%m-%d')}/{end_date.strftime('%Y-%m-%d')}"
@@ -404,7 +404,7 @@ def main():
     # --- MODO NORMAL ---
     descargar_sentinel2()   # Comenta si no quieres Sentinel-2
     descargar_landsat()     # Comenta si no quieres Landsat
-    # descargar_dem()        # Comenta si no quieres DEM
+    descargar_dem()        # Comenta si no quieres DEM
     logging.info("===== DESCARGA COMPLETADA =====")
 
 if __name__ == "__main__":
