@@ -8,8 +8,8 @@ import re
 
 def run_clasificacion():
     """
-    Dashboard del PUNTO 2: muestra la clasificación binaria glaciar vs. roca/suelo
-    obtenida al umbralizar el NDSI (>= 0.4) en scripts/spatial_analysis.py.
+    Dashboard Etapa 3: máscara binaria glaciar vs. roca/suelo con filtro
+    altitudinal FABDEM. Lee los rasters generados por analyze_glacier.py.
     """
     st.markdown("""
         <style>
@@ -20,9 +20,11 @@ def run_clasificacion():
         </style>
     """, unsafe_allow_html=True)
 
-    st.subheader("Clasificación glaciar vs. roca/suelo - Glaciar Echaurren")
-    st.caption("Punto 2 | Máscara binaria a partir del NDSI (umbral ≥ 0.4) | "
-               "Pasa el cursor sobre el mapa para ver la clase")
+    st.subheader("Clasificación glaciar vs. roca/suelo — Glaciar Echaurren")
+    st.caption(
+        "Etapa 3 | Máscara binaria: NDSI ≥ 0.4 y elevación ≥ 3 000 m s.n.m. (FABDEM) | "
+        "Pasa el cursor sobre el mapa para ver la clase"
+    )
 
     BASE_DIR = Path(__file__).resolve().parents[2]
     CLAS_DIR = BASE_DIR / "data" / "processed" / "clasificacion"
@@ -30,20 +32,16 @@ def run_clasificacion():
     @st.cache_data
     def obtener_lista_archivos(dir_sensor_str):
         dir_sensor = Path(dir_sensor_str)
-        archivos = list(dir_sensor.glob("*.tif"))
+        archivos   = list(dir_sensor.glob("*.tif"))
         if not archivos:
             st.error(f"No se encontraron clasificaciones en {dir_sensor}")
             st.stop()
 
         def extraer_año(nombre):
-            match = re.search(r'(\d{4})\d{2}\d{2}', nombre)
+            match = re.search(r"(\d{4})\d{4}", nombre)
             return int(match.group(1)) if match else None
 
-        pares = []
-        for p in archivos:
-            año = extraer_año(p.name)
-            if año:
-                pares.append((año, p))
+        pares = [(extraer_año(p.name), p) for p in archivos if extraer_año(p.name)]
         pares.sort(key=lambda x: x[0])
         return pares
 
@@ -60,10 +58,9 @@ def run_clasificacion():
     with col_controls:
         sensor = st.radio("Sensor", ("Landsat", "Sentinel-2"), key="clasif_sensor")
         subdir = "landsat" if sensor == "Landsat" else "sentinel2"
-
-        pares = obtener_lista_archivos(str(CLAS_DIR / subdir))
-        años = [a for a, _ in pares]
-        rutas = [r for _, r in pares]
+        pares  = obtener_lista_archivos(str(CLAS_DIR / subdir))
+        años   = [a for a, _ in pares]
+        rutas  = [r for _, r in pares]
 
         año_seleccionado = st.select_slider(
             "Selecciona el año",
@@ -72,7 +69,7 @@ def run_clasificacion():
             format_func=str,
             key="clasif_slider"
         )
-        ruta = rutas[años.index(año_seleccionado)]
+        ruta   = rutas[años.index(año_seleccionado)]
         clasif = cargar_array_clasif(str(ruta))
 
         px_glaciar = int(np.nansum(clasif == 1))
@@ -83,17 +80,21 @@ def run_clasificacion():
         st.write(f"**Año:** {año_seleccionado}")
         st.write(f"**Archivo:** `{ruta.name}`")
         st.write(f"**Píxeles glaciar:** {px_glaciar} / {px_validos}")
+        st.markdown("**Filtros aplicados:**")
+        st.markdown("• NDSI ≥ 0.4")
+        st.markdown("• Elevación ≥ 3 000 m s.n.m. (FABDEM)")
+        st.markdown("• Parches < 5 000 m² descartados")
         st.markdown("**Clases:**")
-        st.markdown("• &nbsp; 🔵 1 → glaciar (NDSI ≥ 0.4)")
+        st.markdown("• &nbsp; 🔵 1 → glaciar")
         st.markdown("• &nbsp; 🟤 0 → roca / suelo")
 
     with col_map:
         fig = px.imshow(
             clasif,
-            color_continuous_scale=[[0.0, '#8c6d4f'], [1.0, '#1f6fe0']],
+            color_continuous_scale=[[0.0, "#8c6d4f"], [1.0, "#1f6fe0"]],
             zmin=0, zmax=1,
-            aspect='equal',
-            origin='upper',
+            aspect="equal",
+            origin="upper",
             labels=dict(x="Columna (píxel)", y="Fila (píxel)", color="Clase")
         )
         fig.update_traces(hovertemplate="Clase: %{z:.0f}<extra></extra>")
@@ -105,6 +106,7 @@ def run_clasificacion():
             margin=dict(l=0, r=0, t=0, b=0),
             height=600
         )
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True})
+        st.plotly_chart(fig, use_container_width=True,
+                        config={"displayModeBar": True})
 
     st.caption(f"Datos fuente: `{CLAS_DIR / subdir}`")

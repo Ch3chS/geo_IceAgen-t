@@ -1,0 +1,5 @@
+sensor,decada,n_años,mediana_km2,tasa_km2_año
+landsat,1985-1994,10,1.355,0.02024
+landsat,1995-2004,10,1.0156,0.19882
+landsat,2005-2014,9,0.7146,-0.25469
+landsat,2015-2025,9,0.2511,-0.01733
