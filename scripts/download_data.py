@@ -61,7 +61,7 @@ MAX_ITEMS_PER_YEAR = 1
 MIN_AOI_COVERAGE = 0.95
 
 # Año desde el que Landsat 7 tiene fallo SLC-off (franjas negras diagonales)
-L7_SLC_FAIL_YEAR = 2003
+L7_SLC_FAIL_YEAR = 2004
 
 # ============================================================================
 # SESSION POR HILO
