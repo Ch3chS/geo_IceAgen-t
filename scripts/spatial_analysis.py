@@ -17,6 +17,7 @@ import rasterio
 from rasterio.enums import Resampling
 from rasterio.features import shapes
 from rasterio.warp import reproject
+from scipy import stats
 import geopandas as gpd
 from shapely.geometry import shape
 
@@ -42,18 +43,21 @@ DEM_PATH = BASE_DIR / "data" / "raw" / "fabdem" / "fabdem_dem.tif"
 UMBRAL_NDSI = 0.4
 ELEV_MIN_M  = 3000
 AREA_MIN_M2 = 5_000
-CRS_SALIDA  = "EPSG:32719"   # UTM zona 19S — CRS común para todas las salidas
+CRS_SALIDA  = "EPSG:32719"
 
 NODATA_IN  = -9999.0
 NODATA_OUT = 255
 
-# Año base por sensor — Landsat desde 1985, S2 desde su primer año disponible
 AÑO_BASE = {
     "landsat":   1985,
-    "sentinel2": None,   # se asigna dinámicamente al primer año disponible
+    "sentinel2": None,  # primer año disponible
 }
 
 DECADAS = [(1985, 1994), (1995, 2004), (2005, 2014), (2015, 2025)]
+
+# Ventana para la media móvil centrada usada en el delta acumulado.
+# Con 5 años (±2) se suaviza la variabilidad interanual sin ocultar tendencias.
+VENTANA_MEDIA_MOVIL = 5
 
 for d in [CLAS_DIR, VECTOR_DIR, OUT_DIR]:
     d.mkdir(parents=True, exist_ok=True)
@@ -62,14 +66,29 @@ for d in [CLAS_DIR, VECTOR_DIR, OUT_DIR]:
 # ============================================================================
 # UTILIDADES
 # ============================================================================
-def _año_de_nombre(nombre):
-    m = re.search(r'(\d{4})\d{4}', nombre)
-    return int(m.group(1)) if m else None
+
+# Patrón explícito: busca _YYYYMMDD_ en el nombre del archivo.
+_RE_FECHA_NOMBRE = re.compile(r'(?:^|_)(\d{4})(\d{2})(\d{2})(?:_|\.)')
+
+
+def _año_de_nombre(nombre: str):
+    """Extrae el año de un nombre de archivo con fecha _YYYYMMDD_."""
+    m = _RE_FECHA_NOMBRE.search(nombre)
+    if not m:
+        logging.debug(f"No se pudo extraer año de: {nombre}")
+        return None
+    año = int(m.group(1))
+    # Sanidad básica: rechazar años fuera del rango satelital esperado
+    if not (1972 <= año <= 2100):
+        logging.debug(f"Año extraído fuera de rango ({año}) en: {nombre}")
+        return None
+    return año
 
 
 def _cargar_dem_reproyectado(meta_destino):
     if not DEM_PATH.exists():
-        logging.warning(f"FABDEM no encontrado en {DEM_PATH} — omitiendo filtro altitudinal")
+        logging.warning(
+            f"FABDEM no encontrado en {DEM_PATH} — omitiendo filtro altitudinal")
         return None
     h, w = meta_destino['height'], meta_destino['width']
     dem_repr = np.zeros((h, w), dtype=np.float32)
@@ -89,9 +108,10 @@ def _cargar_dem_reproyectado(meta_destino):
 # ============================================================================
 # ETAPA 3A — CLASIFICACIÓN CON FILTRO DEM
 # ============================================================================
+
 def clasificar_ndsi(ndsi, dem=None, nodata_in=NODATA_IN):
     clasif = np.full(ndsi.shape, NODATA_OUT, dtype=np.uint8)
-    valido = (ndsi != nodata_in) & (~np.isnan(ndsi))
+    valido  = (ndsi != nodata_in) & (~np.isnan(ndsi))
     mascara = valido & (ndsi >= UMBRAL_NDSI)
     if dem is not None:
         n_filt = int(np.sum(mascara & (dem < ELEV_MIN_M)))
@@ -126,8 +146,10 @@ def clasificar_carpeta(sensor, dir_ndsi):
         return
     dir_out = CLAS_DIR / sensor
     dir_out.mkdir(parents=True, exist_ok=True)
-    logging.info(f"=== CLASIFICANDO {sensor.upper()} "
-                 f"(NDSI >= {UMBRAL_NDSI}, DEM >= {ELEV_MIN_M} m) ===")
+    logging.info(
+        f"=== CLASIFICANDO {sensor.upper()} "
+        f"(NDSI >= {UMBRAL_NDSI}, DEM >= {ELEV_MIN_M} m) ==="
+    )
     for f in archivos:
         salida = dir_out / f.name.replace("ndsi", "clasif")
         clasificar_raster(f, salida)
@@ -136,6 +158,7 @@ def clasificar_carpeta(sensor, dir_ndsi):
 # ============================================================================
 # ETAPA 3B — VECTORIZACIÓN → GEOPACKAGE
 # ============================================================================
+
 def vectorizar_raster(ruta_clasif, sensor, año):
     with rasterio.open(ruta_clasif) as src:
         clasif    = src.read(1)
@@ -143,7 +166,8 @@ def vectorizar_raster(ruta_clasif, sensor, año):
         crs       = src.crs
 
     mascara = (clasif == 1).astype(np.uint8)
-    geoms   = [shape(g) for g, v in shapes(mascara, mask=mascara, transform=transform)
+    geoms   = [shape(g) for g, v in shapes(mascara, mask=mascara,
+                                            transform=transform)
                if int(v) == 1]
 
     if not geoms:
@@ -153,7 +177,6 @@ def vectorizar_raster(ruta_clasif, sensor, año):
 
     gdf = gpd.GeoDataFrame({'geometry': geoms}, crs=crs)
 
-    # Forzar CRS común antes de calcular áreas
     if gdf.crs.to_epsg() != 32719:
         gdf = gdf.to_crs(CRS_SALIDA)
 
@@ -161,7 +184,8 @@ def vectorizar_raster(ruta_clasif, sensor, año):
     antes = len(gdf)
     gdf   = gdf[gdf['area_m2'] >= AREA_MIN_M2].reset_index(drop=True)
     if antes - len(gdf):
-        logging.info(f"    Descartados {antes - len(gdf)} parches < {AREA_MIN_M2} m²")
+        logging.info(
+            f"    Descartados {antes - len(gdf)} parches < {AREA_MIN_M2} m²")
 
     gdf['año']      = año
     gdf['sensor']   = sensor
@@ -188,7 +212,6 @@ def vectorizar_todos():
                 gdfs.append(gdf)
 
         if gdfs:
-            # Ya vienen en CRS_SALIDA desde vectorizar_raster — concat seguro
             gdf_sensor = pd.concat(gdfs, ignore_index=True)
             gdf_sensor = gpd.GeoDataFrame(gdf_sensor, crs=CRS_SALIDA)
             out_gpkg   = VECTOR_DIR / f"glaciar_echaurren_{sensor}.gpkg"
@@ -196,7 +219,6 @@ def vectorizar_todos():
             logging.info(f"  ✓ {out_gpkg.name} ({len(gdf_sensor)} polígonos)")
             gdfs_por_sensor[sensor] = gdf_sensor
 
-    # GeoPackage combinado
     if gdfs_por_sensor:
         gdf_all = pd.concat(gdfs_por_sensor.values(), ignore_index=True)
         gdf_all = gpd.GeoDataFrame(gdf_all, crs=CRS_SALIDA)
@@ -211,10 +233,44 @@ def vectorizar_todos():
 # ============================================================================
 # ETAPA 4 — SERIES TEMPORALES INDEPENDIENTES POR SENSOR
 # ============================================================================
+
+def _media_movil_centrada(series: pd.Series, ventana: int) -> pd.Series:
+    """
+    Media móvil centrada con min_periods=1 para no perder extremos de la serie.
+    Se usa como referencia dinámica en el cálculo del delta acumulado, evitando
+    que un único año base atípico (muy nevoso o muy seco) distorsione toda la
+    serie de cambio.
+    """
+    return series.rolling(window=ventana, center=True, min_periods=1).mean()
+
+
 def construir_serie_sensor(gdf_sensor, sensor):
     """
-    Serie temporal para un sensor. Delta acumulado respecto a su propio año base
-    (1985 para Landsat, primer año disponible para Sentinel-2).
+    Serie temporal para un sensor con delta acumulado mejorado.
+
+    Cambio metodológico respecto a la versión anterior
+    ─────────────────────────────────────────────────────
+    Versión anterior: delta_km2 = At - A_{año_base}
+        Problema: el delta acumulado depende enteramente de un único valor
+        de referencia (el área del año base). Si ese año fue atípicamente
+        nevoso o seco, toda la serie queda sesgada. Además, el "porcentaje
+        de cambio" resultante describe solo cuánto cambió respecto a ese
+        punto, no la tendencia real de largo plazo.
+
+    Versión corregida: delta_km2 = At - MM_t
+        donde MM_t es la media móvil centrada de ventana VENTANA_MEDIA_MOVIL
+        calculada sobre la propia serie. El delta ahora mide la desviación
+        de cada año respecto a su entorno temporal inmediato, capturando
+        anomalías interanuales sin depender de un año ancla.
+
+    Para la comparación de largo plazo se conserva también:
+        - area_ref_km2: área del año base (referencia fija, para informe)
+        - delta_largo_plazo_km2: At - A_{año_base} (tendencia acumulada total)
+
+    Adicionalmente se añade el cálculo de la tendencia lineal global
+    (regresión por mínimos cuadrados) para reportar una tasa de cambio
+    robusta y el cambio porcentual basado en la recta de regresión.
+
     Devuelve DataFrame con una fila por año.
     """
     area_por_año = (
@@ -226,25 +282,77 @@ def construir_serie_sensor(gdf_sensor, sensor):
         .reset_index(drop=True)
     )
 
-    año_base_cfg = AÑO_BASE.get(sensor)
-    if año_base_cfg and año_base_cfg in area_por_año['año'].values:
-        año_base  = año_base_cfg
+    # --- Referencia de largo plazo: mediana del quintil inicial y final -------
+    #
+    # Problema con año puntual: usar A_{año_base} (o A_{año_final}) como
+    # referencia hace que todo el cambio acumulado dependa de 1 sola medición,
+    # que puede ser atípicamente alta o baja (nevada excepcional, nubosidad
+    # residual, etc.).
+    #
+    # Solución: la referencia de inicio es la mediana del 20 % de años más
+    # antiguos de la serie; la referencia de cierre (para pct_largo_plazo al
+    # final) se calcula análogamente con el 20 % más reciente. El delta de
+    # cada año se expresa respecto a la referencia de inicio, igual que antes,
+    # pero ahora esa referencia es robusta a observaciones aisladas.
+    n = len(area_por_año)
+    q = max(1, n // 5)   # tamaño del quintil (mínimo 1 año)
+
+    area_ref_inicio = float(
+        area_por_año['area_total_km2'].iloc[:q].median()
+    )
+    año_base = int(area_por_año['año'].iloc[0])   # conservado solo para log/CSV
+
+    # También guardamos la referencia del quintil final para el % de cambio
+    # al final de la serie (más estable que el último año puntual)
+    area_ref_fin = float(
+        area_por_año['area_total_km2'].iloc[-q:].median()
+    )
+
+    logging.info(
+        f"  {sensor} — ref. inicio (mediana primeros {q} años): "
+        f"{area_ref_inicio:.4f} km²  |  "
+        f"ref. fin (mediana últimos {q} años): {area_ref_fin:.4f} km²"
+    )
+
+    # --- Delta de largo plazo (At - ref_inicio) --------------------------------
+    area_por_año['sensor']                = sensor
+    area_por_año['año_base']              = año_base
+    area_por_año['area_ref_km2']          = round(area_ref_inicio, 5)
+    area_por_año['area_ref_fin_km2']      = round(area_ref_fin, 5)
+    area_por_año['delta_largo_plazo_km2'] = (
+        area_por_año['area_total_km2'] - area_ref_inicio).round(5)
+    area_por_año['pct_largo_plazo']       = (
+        area_por_año['delta_largo_plazo_km2'] / area_ref_inicio * 100).round(2)
+
+    # --- Delta interanual (At - MM_t): anomalía respecto a tendencia local ---
+    # Captura si un año fue excepcionalmente más o menos glaciado que sus
+    # vecinos, sin el sesgo del año ancla.
+    mm = _media_movil_centrada(
+        area_por_año['area_total_km2'], VENTANA_MEDIA_MOVIL)
+    area_por_año['media_movil_km2']   = mm.round(5)
+    area_por_año['delta_anomalia_km2'] = (
+        area_por_año['area_total_km2'] - mm).round(5)
+    area_por_año['pct_anomalia']       = (
+        area_por_año['delta_anomalia_km2'] / mm * 100).round(2)
+
+    # --- Tendencia lineal global (regresión) ---------------------------------
+    # Calcula la recta de tendencia para toda la serie del sensor
+    x_vals = area_por_año['año'].values
+    y_vals = area_por_año['area_total_km2'].values
+    if len(x_vals) >= 2:
+        pend, inter = np.polyfit(x_vals, y_vals, 1)
+        area_tendencia_inicio = pend * x_vals[0] + inter
+        area_tendencia_fin    = pend * x_vals[-1] + inter
+        cambio_tendencia_pct   = (area_tendencia_fin - area_tendencia_inicio) / area_tendencia_inicio * 100
     else:
-        año_base  = area_por_año['año'].min()
-        if año_base_cfg:
-            logging.warning(
-                f"{sensor}: año base {año_base_cfg} no disponible — usando {año_base}")
+        pend = area_tendencia_inicio = area_tendencia_fin = cambio_tendencia_pct = np.nan
 
-    area_base = area_por_año.loc[
-        area_por_año['año'] == año_base, 'area_total_km2'].values[0]
-    logging.info(f"  {sensor} — año base: {año_base} → {area_base:.4f} km²")
+    area_por_año['tasa_lineal_km2_año']       = pend
+    area_por_año['area_tendencia_inicio_km2'] = area_tendencia_inicio
+    area_por_año['area_tendencia_fin_km2']    = area_tendencia_fin
+    area_por_año['cambio_tendencia_pct']      = cambio_tendencia_pct
 
-    area_por_año['sensor']      = sensor
-    area_por_año['año_base']    = año_base
-    area_por_año['delta_km2']   = (area_por_año['area_total_km2'] - area_base).round(5)
-    area_por_año['pct_cambio']  = (
-        area_por_año['delta_km2'] / area_base * 100).round(2)
-
+    # --- Década --------------------------------------------------------------
     def asignar_decada(año):
         for ini, fin in DECADAS:
             if ini <= año <= fin:
@@ -256,33 +364,86 @@ def construir_serie_sensor(gdf_sensor, sensor):
 
 
 def analisis_decadas_sensor(serie, sensor):
-    """Mediana y tasa de cambio por década para un sensor."""
+    """
+    Mediana, tasa de cambio y métricas de ajuste por década para un sensor.
+
+    Cambio metodológico respecto a la versión anterior
+    ─────────────────────────────────────────────────────
+    Versión anterior: np.polyfit(años, áreas, 1)[0]
+        Solo devolvía la pendiente sin ninguna métrica de ajuste, haciendo
+        imposible distinguir una tendencia significativa de ruido. Tampoco
+        reportaba incertidumbre.
+
+    Versión corregida: scipy.stats.linregress
+        Entrega además R², p-valor, error estándar de la pendiente e
+        intervalo de confianza al 95% (±1.96·se). Esto permite:
+        - Evaluar si la tasa es estadísticamente significativa (p < 0.05).
+        - Comparar la aceleración entre décadas con base estadística.
+        - Reportar la incertidumbre de la estimación.
+    """
     resumen = []
     for ini, fin in DECADAS:
-        sub = serie[(serie['año'] >= ini) & (serie['año'] <= fin)]
+        sub = serie[(serie['año'] >= ini) & (serie['año'] <= fin)].copy()
         if sub.empty:
             continue
-        mediana = sub['area_total_km2'].median()
-        tasa    = (np.polyfit(sub['año'], sub['area_total_km2'], 1)[0]
-                   if len(sub) >= 2 else float('nan'))
+
+        mediana = float(sub['area_total_km2'].median())
+        n       = len(sub)
+
+        if n >= 3:
+            result  = stats.linregress(sub['año'], sub['area_total_km2'])
+            pendiente = result.slope
+            r2        = result.rvalue ** 2
+            p_valor   = result.pvalue
+            se        = result.stderr
+            ic95_inf  = pendiente - 1.96 * se
+            ic95_sup  = pendiente + 1.96 * se
+        elif n == 2:
+            # Con solo 2 puntos la regresión es exacta pero no tiene p-valor
+            # significativo; se reportan pendiente y R²=1 con advertencia.
+            result    = stats.linregress(sub['año'], sub['area_total_km2'])
+            pendiente = result.slope
+            r2        = 1.0
+            p_valor   = float('nan')
+            se        = float('nan')
+            ic95_inf  = float('nan')
+            ic95_sup  = float('nan')
+            logging.warning(
+                f"  {sensor} {ini}-{fin}: solo 2 años — tasa orientativa")
+        else:
+            pendiente = float('nan')
+            r2        = float('nan')
+            p_valor   = float('nan')
+            se        = float('nan')
+            ic95_inf  = float('nan')
+            ic95_sup  = float('nan')
+
         resumen.append({
-            'sensor':       sensor,
-            'decada':       f"{ini}-{fin}",
-            'n_años':       len(sub),
-            'mediana_km2':  round(mediana, 4),
-            'tasa_km2_año': round(tasa, 5),
+            'sensor':        sensor,
+            'decada':        f"{ini}-{fin}",
+            'n_años':        n,
+            'mediana_km2':   round(mediana, 4),
+            'tasa_km2_año':  round(pendiente, 5) if not np.isnan(pendiente) else float('nan'),
+            'r2':            round(r2, 4)        if not np.isnan(r2)        else float('nan'),
+            'p_valor':       round(p_valor, 4)   if not np.isnan(p_valor)   else float('nan'),
+            'se_pendiente':  round(se, 6)         if not np.isnan(se)        else float('nan'),
+            'ic95_inf':      round(ic95_inf, 5)  if not np.isnan(ic95_inf)  else float('nan'),
+            'ic95_sup':      round(ic95_sup, 5)  if not np.isnan(ic95_sup)  else float('nan'),
         })
+        sig = "✓ sig." if (not np.isnan(p_valor) and p_valor < 0.05) else "– n.s."
         logging.info(
             f"  {sensor} {ini}-{fin}: mediana={mediana:.4f} km²  "
-            f"tasa={tasa:+.5f} km²/año  (n={len(sub)})")
+            f"tasa={pendiente:+.5f} km²/año  R²={r2:.3f}  "
+            f"p={p_valor:.3f} {sig}  (n={n})"
+        )
     return pd.DataFrame(resumen)
 
 
+# ============================================================================
+# GUARDADO DE RESULTADOS
+# ============================================================================
+
 def guardar_resultados(series_dict, decadas_dict):
-    """
-    Guarda un CSV por sensor y uno combinado para la serie anual.
-    Idem para décadas.
-    """
     series_all  = []
     decadas_all = []
 
@@ -298,9 +459,8 @@ def guardar_resultados(series_dict, decadas_dict):
         logging.info(f"  ✓ {csv_d.name}")
         decadas_all.append(dec)
 
-    # Combinados (para el dashboard que quiera ver ambos sensores a la vez)
     pd.concat(series_all,  ignore_index=True).to_csv(
-        OUT_DIR / "serie_temporal_todos.csv",  index=False, encoding='utf-8')
+        OUT_DIR / "serie_temporal_todos.csv",   index=False, encoding='utf-8')
     pd.concat(decadas_all, ignore_index=True).to_csv(
         OUT_DIR / "analisis_decadas_todos.csv", index=False, encoding='utf-8')
     logging.info("  ✓ serie_temporal_todos.csv")
@@ -310,17 +470,15 @@ def guardar_resultados(series_dict, decadas_dict):
 # ============================================================================
 # MAIN
 # ============================================================================
+
 def main():
-    # Etapa 3A: clasificación con filtro DEM
     logging.info("===== ETAPA 3A: CLASIFICACIÓN =====")
     for sensor, dir_ndsi in NDSI_DIRS.items():
         clasificar_carpeta(sensor, dir_ndsi)
 
-    # Etapa 3B: vectorización → GeoPackage
     logging.info("===== ETAPA 3B: VECTORIZACIÓN =====")
     gdfs_por_sensor = vectorizar_todos()
 
-    # Etapa 4: series independientes por sensor + décadas
     logging.info("===== ETAPA 4: SERIES TEMPORALES =====")
     series_dict  = {}
     decadas_dict = {}

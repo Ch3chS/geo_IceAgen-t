@@ -8,6 +8,10 @@ from pathlib import Path
 import branca.colormap as cm
 import numpy as np
 
+# Patrón de fecha consistente con spatial_analysis.py
+import re
+_RE_FECHA_NOMBRE = re.compile(r'(?:^|_)(\d{4})(\d{2})(\d{2})(?:_|\.)')
+
 
 def run_poligonos():
     st.markdown("""
@@ -22,7 +26,7 @@ def run_poligonos():
     st.caption(
         "Etapa 3 | Polígonos vectoriales generados a partir de las máscaras NDSI "
         "con filtro FABDEM ≥ 3 000 m s.n.m. | "
-        "Color: Δ área acumulado respecto al año base del sensor"
+        "Color: Δ área de largo plazo respecto al año base del sensor"
     )
 
     BASE_DIR   = Path(__file__).resolve().parents[2]
@@ -55,29 +59,32 @@ def run_poligonos():
     @st.cache_data
     def cargar_gpkg(path_str):
         gdf = gpd.read_file(path_str)
-        # Reproyectar a WGS84 para Folium
         return gdf.to_crs(epsg=4326)
 
     gdf = cargar_gpkg(str(gpkg_path))
 
-    # Cargar serie temporal para obtener delta acumulado por año
-    serie_path = OUT_DIR / f"serie_temporal_{sensor_sel.lower().replace('-', '')}.csv"
-    if not serie_path.exists():
-        # Intentar nombre alternativo
-        serie_path = OUT_DIR / f"serie_temporal_{'landsat' if sensor_sel == 'Landsat' else 'sentinel2'}.csv"
+    # Cargar serie temporal para obtener delta de largo plazo por año
+    sensor_key = 'landsat' if sensor_sel == 'Landsat' else 'sentinel2'
+    serie_path = OUT_DIR / f"serie_temporal_{sensor_key}.csv"
 
-    delta_por_año = {}
+    delta_por_año    = {}
+    media_movil_año  = {}
     if serie_path.exists():
         serie = pd.read_csv(serie_path)
-        delta_por_año = dict(zip(serie['año'].astype(int),
-                                 serie['delta_km2']))
+        # delta_largo_plazo_km2: cambio acumulado respecto al año base (referencia fija)
+        delta_por_año   = dict(zip(serie['año'].astype(int),
+                                   serie['delta_largo_plazo_km2']))
+        # media_movil_km2: referencia dinámica local (para tooltip informativo)
+        if 'media_movil_km2' in serie.columns:
+            media_movil_año = dict(zip(serie['año'].astype(int),
+                                       serie['media_movil_km2']))
 
-    # Añadir delta al GDF
-    gdf['delta_km2'] = gdf['año'].map(delta_por_año).fillna(0)
+    gdf['delta_largo_plazo_km2'] = gdf['año'].map(delta_por_año).fillna(0.0)
+    gdf['media_movil_km2']       = gdf['año'].map(media_movil_año).fillna(np.nan)
 
     with col_ctrl:
-        años_disp   = sorted(gdf['año'].unique())
-        rango_años  = st.select_slider(
+        años_disp  = sorted(gdf['año'].unique())
+        rango_años = st.select_slider(
             "Rango de años",
             options=años_disp,
             value=(años_disp[0], años_disp[-1]),
@@ -101,7 +108,6 @@ def run_poligonos():
         "OpenStreetMap":    "© OpenStreetMap contributors",
     }
 
-    # Filtrar por rango de años
     gdf_fil = gdf[
         (gdf['año'] >= rango_años[0]) & (gdf['año'] <= rango_años[1])
     ].copy()
@@ -109,8 +115,7 @@ def run_poligonos():
     with col_info:
         c1, c2, c3 = st.columns(3)
         c1.metric("Polígonos visibles", len(gdf_fil))
-        c2.metric("Años cubiertos",
-                  len(gdf_fil['año'].unique()))
+        c2.metric("Años cubiertos",     len(gdf_fil['año'].unique()))
         c3.metric("Área total visible",
                   f"{gdf_fil['area_km2'].sum():.4f} km²")
 
@@ -119,19 +124,19 @@ def run_poligonos():
         return
 
     # ── Paleta divergente RdBu centrada en 0 ────────────────────────────────
-    vmax = max(abs(gdf_fil['delta_km2'].min()),
-               abs(gdf_fil['delta_km2'].max()))
+    vals = gdf_fil['delta_largo_plazo_km2'].dropna()
+    vmax = max(abs(vals.min()), abs(vals.max())) if len(vals) else 1.0
     vmax = vmax if vmax > 0 else 1.0
 
     colormap = cm.LinearColormap(
         colors=['#d73027', '#f46d43', '#fdae61', '#ffffff',
                 '#abd9e9', '#74add1', '#4575b4'],
         vmin=-vmax, vmax=vmax,
-        caption=f"Δ área acumulado (km²) respecto al año base"
+        caption="Δ área de largo plazo (km²) respecto al año base"
     )
 
     def estilo(feature):
-        delta = feature['properties'].get('delta_km2', 0) or 0
+        delta = feature['properties'].get('delta_largo_plazo_km2', 0) or 0
         return {
             'fillColor':   colormap(delta),
             'color':       'white',
@@ -155,14 +160,18 @@ def run_poligonos():
         gdf_fil.__geo_interface__,
         style_function=estilo,
         tooltip=GeoJsonTooltip(
-            fields=['año', 'sensor', 'area_km2', 'delta_km2'],
-            aliases=['Año', 'Sensor', 'Área (km²)', 'Δ acumulado (km²)'],
+            fields=['año', 'sensor', 'area_km2',
+                    'delta_largo_plazo_km2', 'media_movil_km2'],
+            aliases=['Año', 'Sensor', 'Área (km²)',
+                     'Δ largo plazo (km²)', 'Media móvil (km²)'],
             localize=True,
             sticky=False,
         ),
         popup=GeoJsonPopup(
-            fields=['año', 'sensor', 'area_km2', 'delta_km2'],
-            aliases=['Año', 'Sensor', 'Área (km²)', 'Δ acumulado (km²)'],
+            fields=['año', 'sensor', 'area_km2',
+                    'delta_largo_plazo_km2', 'media_movil_km2'],
+            aliases=['Año', 'Sensor', 'Área (km²)',
+                     'Δ largo plazo (km²)', 'Media móvil (km²)'],
         ),
         name="Polígonos glaciares"
     ).add_to(m)
@@ -177,20 +186,23 @@ def run_poligonos():
         resumen = (
             gdf_fil.groupby('año')
             .agg(
-                n_poligonos=('area_km2', 'count'),
-                area_total_km2=('area_km2', 'sum'),
-                delta_km2=('delta_km2', 'first'),
+                n_poligonos           =('area_km2', 'count'),
+                area_total_km2        =('area_km2', 'sum'),
+                delta_largo_plazo_km2 =('delta_largo_plazo_km2', 'first'),
+                media_movil_km2       =('media_movil_km2', 'first'),
             )
             .reset_index()
             .rename(columns={
-                'año':            'Año',
-                'n_poligonos':    'N polígonos',
-                'area_total_km2': 'Área total (km²)',
-                'delta_km2':      'Δ acumulado (km²)',
+                'año':                   'Año',
+                'n_poligonos':           'N polígonos',
+                'area_total_km2':        'Área total (km²)',
+                'delta_largo_plazo_km2': 'Δ largo plazo (km²)',
+                'media_movil_km2':       'Media móvil (km²)',
             })
         )
-        resumen['Área total (km²)']   = resumen['Área total (km²)'].round(4)
-        resumen['Δ acumulado (km²)']  = resumen['Δ acumulado (km²)'].round(4)
+        resumen['Área total (km²)']    = resumen['Área total (km²)'].round(4)
+        resumen['Δ largo plazo (km²)'] = resumen['Δ largo plazo (km²)'].round(4)
+        resumen['Media móvil (km²)']   = resumen['Media móvil (km²)'].round(4)
         st.dataframe(resumen, use_container_width=True, hide_index=True)
 
     st.caption(

@@ -14,3 +14,4 @@ planetary-computer
 streamlit
 plotly>=5.0.0
 streamlit_folium
+scipy

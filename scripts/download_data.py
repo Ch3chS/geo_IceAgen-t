@@ -489,7 +489,7 @@ def ejecutar_debug():
 def main():
     logging.info("===== INICIANDO DESCARGA =====")
     # ejecutar_debug()
-    descargar_sentinel2()
+    #descargar_sentinel2()
     descargar_landsat()
     descargar_dem()
     logging.info("===== DESCARGA COMPLETADA =====")
