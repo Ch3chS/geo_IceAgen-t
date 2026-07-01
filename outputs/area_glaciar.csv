@@ -1,0 +1,15 @@
+sensor,anio,px_glaciar,area_km2
+landsat,1985,1622,1.4598
+landsat,1990,1175,1.0575
+landsat,1991,0,0.0
+landsat,1992,2542,2.2878
+landsat,1995,382,0.3438
+sentinel2,2016,9164,0.9164
+sentinel2,2017,67,0.0067
+sentinel2,2018,2337,0.2337
+sentinel2,2019,2363,0.2363
+sentinel2,2020,1361,0.1361
+sentinel2,2021,6972,0.6972
+sentinel2,2022,988,0.0988
+sentinel2,2023,899,0.0899
+sentinel2,2024,12813,1.2813
