@@ -1,8 +1,10 @@
 import streamlit as st
 import rasterio
 from rasterio.enums import Resampling
+from rasterio.transform import from_bounds as transform_from_bounds # Importante para la escala
 import numpy as np
 import plotly.express as px
+import geopandas as gpd # Importante para cargar el shapefile
 from pathlib import Path
 import re
 
@@ -20,12 +22,24 @@ def run_ndsi_landsat():
         </style>
     """, unsafe_allow_html=True)
 
-    # 1. TÍTULO DINÁMICO (Usando Placeholder)
+    # 1. TÍTULO DINÁMICO
     titulo_placeholder = st.empty()
     st.caption("Índice NDSI desde Landsat (1985-2026) | Pasa el cursor sobre el mapa para ver valores")
 
     BASE_DIR = Path(__file__).resolve().parents[2]
     PROCESSED_DIR = BASE_DIR / "data" / "processed" / "landsat"
+    DGA_VECTOR_PATH = BASE_DIR / "data" / "IPG_2022_v2" / "INV_PG_2022_v2.shp"
+
+    @st.cache_data
+    def cargar_poligono_dga():
+        """Carga, filtra y reproyecta el shapefile de la DGA una sola vez."""
+        if not DGA_VECTOR_PATH.exists():
+            return None
+        inventario_dga = gpd.read_file(DGA_VECTOR_PATH)
+        echaurren_vector = inventario_dga[
+            inventario_dga['NOMBRE'].str.contains('Echaurren Norte', case=False, na=False)
+        ]
+        return echaurren_vector.to_crs(epsg=32719)
 
     @st.cache_data
     def obtener_lista_archivos():
@@ -35,7 +49,6 @@ def run_ndsi_landsat():
             st.stop()
 
         def extraer_datos(nombre):
-            # Extraer año y fecha completa (YYYY-MM-DD)
             match = re.search(r'(\d{8})', nombre)
             if match:
                 fecha_cruda = match.group(1)
@@ -55,15 +68,25 @@ def run_ndsi_landsat():
 
     @st.cache_data
     def cargar_array_ndsi(ruta_tif, escala=0.5):
+        """
+        Lee la matriz, la reduce por la escala y recalcula la transformación 
+        cartográfica para que el polígono DGA coincida con la imagen achicada.
+        """
         with rasterio.open(ruta_tif) as src:
             h_orig, w_orig = src.height, src.width
             h_new = max(1, int(h_orig * escala))
             w_new = max(1, int(w_orig * escala))
+            
             data = src.read(1, out_shape=(h_new, w_new), resampling=Resampling.bilinear)
             nodata = src.nodata if src.nodata is not None else -9999
             data = np.where(data == nodata, np.nan, data)
-            return data, h_new, w_new
+            
+            # ¡CLAVE!: Generamos el nuevo transform basado en los límites originales pero con tamaño nuevo
+            nuevo_transform = transform_from_bounds(*src.bounds, w_new, h_new)
+            
+            return data, h_new, w_new, nuevo_transform
 
+    dga_poly = cargar_poligono_dga()
     datos_archivos = obtener_lista_archivos()
     años             = [d[0] for d in datos_archivos]
     fechas_completas = [d[1] for d in datos_archivos]
@@ -75,10 +98,9 @@ def run_ndsi_landsat():
             for d in datos_archivos:
                 año = d[0]
                 ruta = d[2]
-                arr, h, w = cargar_array_ndsi(ruta, escala=0.5)
-                st.session_state.ndsi_arrays_landsat[año] = (arr, h, w)
+                arr, h, w, transf = cargar_array_ndsi(ruta, escala=0.5)
+                st.session_state.ndsi_arrays_landsat[año] = (arr, h, w, transf)
 
-    # 2. PROPORCIÓN DE COLUMNAS AJUSTADA (4 a 1 para más espacio al mapa)
     col_map, col_controls = st.columns([4, 1])
 
     with col_controls:
@@ -93,7 +115,8 @@ def run_ndsi_landsat():
         idx = años.index(año_seleccionado)
         fecha_exacta = fechas_completas[idx]
         ruta         = rutas[idx]
-        ndsi_data, h, w = st.session_state.ndsi_arrays_landsat[año_seleccionado]
+        # Desempaquetamos la matriz, el alto, el ancho y la transformada afín
+        ndsi_data, h, w, transform = st.session_state.ndsi_arrays_landsat[año_seleccionado]
 
         st.markdown("### Metadatos")
         st.write(f"**Sensor:** Landsat")
@@ -104,14 +127,14 @@ def run_ndsi_landsat():
         st.markdown("• &nbsp; > 0.4 → nieve/hielo seguro")
         st.markdown("• &nbsp; 0.1 a 0.4 → nieve parcial / sombras")
         st.markdown("• &nbsp; < 0 → sin nieve")
+        st.markdown("**Vectores:**")
+        st.markdown("• &nbsp; Silueta Oficial DGA (Echaurren Norte)")
 
-    # Inyección del Título Dinámico
     titulo_placeholder.subheader(
         f"Mapa de Índice de Nieve Diferencial Normalizado (NDSI) — Glaciar Echaurren ({año_seleccionado})"
     )
 
     with col_map:
-        # 3. LEYENDA CONTINUA (Ajustada para la escala divergente del NDSI)
         fig = px.imshow(
             ndsi_data,
             color_continuous_scale='RdYlBu_r', 
@@ -125,6 +148,36 @@ def run_ndsi_landsat():
             hoverinfo="z"
         )
         
+        # --- POLÍGONO DGA ---
+        if dga_poly is not None and not dga_poly.empty:
+            inv_transform = ~transform
+            
+            for geom in dga_poly.geometry:
+                polygons = [geom] if geom.geom_type == 'Polygon' else geom.geoms
+                
+                for poly in polygons:
+                    x_esp, y_esp = poly.exterior.coords.xy
+                    cols, rows = [], []
+                    
+                    for x, y in zip(x_esp, y_esp):
+                        col, row = inv_transform * (x, y)
+                        cols.append(col)
+                        rows.append(row)
+                        
+                    # Validación para asegurar que el polígono se dibuje dentro de los límites visuales
+                    if (min(cols) < w and max(cols) > 0 and 
+                        min(rows) < h and max(rows) > 0):
+                        
+                        fig.add_scatter(
+                            x=cols, y=rows,
+                            mode='lines',
+                            line=dict(color="#000000", width=2.5),
+                            name='Silueta DGA',
+                            hoverinfo='skip',
+                            showlegend=False
+                        )
+        # ----------------------------------
+
         fig.update_layout(
             coloraxis_colorbar=dict(
                 title="NDSI", 
@@ -141,7 +194,6 @@ def run_ndsi_landsat():
             height=800
         )
 
-        # 4. NORTE INTEGRADO
         fig.add_annotation(
             x=w * 0.92, y=h * 0.08,
             xref="x", yref="y",
@@ -155,8 +207,9 @@ def run_ndsi_landsat():
             borderpad=8
         )
 
-        # 5. ESCALA GRÁFICA INTERACTIVA
-        # 10 píxeles = 600 metros.
+        # ESCALA GRÁFICA INTERACTIVA (Ajustada para escala=0.5)
+        # La resolución base es 30m. Escala 0.5 = 60m/px.
+        # 10 píxeles = 600 metros exactos.
         tamano_barra_px = 10 
         texto_escala = "600 m" 
         
@@ -180,7 +233,6 @@ def run_ndsi_landsat():
             borderpad=3
         )
 
-        # 6 y 7. DATOS TÉCNICOS (CRS, Fuente, Fecha)
         texto_metadatos = f"<b>CRS:</b> EPSG:32719 (WGS84 / UTM 19S) | <b>Fuente:</b> DGA (Landsat) | <b>Fecha:</b> {fecha_exacta}"
         fig.add_annotation(
             x=w * 0.5, y=h * 0.97,

@@ -13,7 +13,7 @@ import numpy as np
 import rasterio
 from rasterio.windows import from_bounds
 from rasterio.enums import Resampling
-from rasterio.warp import transform_bounds
+from rasterio.warp import transform_bounds, reproject, calculate_default_transform
 from rasterio.transform import from_bounds as transform_from_bounds
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -52,43 +52,44 @@ def _epsg_de_crs(crs) -> int:
 
 def recortar_y_remuestrear_banda(ruta_tif, bounds_utm, target_shape=None):
     """
-    Lee una banda, recorta al AOI (dado en EPSG:32719) transformándolo al CRS
-    nativo del raster. Si se indica target_shape, remuestrea por bilinear.
-
-    Corrección respecto a la versión anterior:
-    - El transform de salida se deriva de los bounds transformados usando
-      rasterio.transform.from_bounds, que es geométricamente correcto sin
-      importar el CRS y sin el cálculo manual de escala que introducía error.
+    Lee una banda, recorta y REPROYECTA forzosamente al AOI estricto (EPSG:32719).
+    Asegura que todas las matrices (Sentinel o Landsat) compartan exactamente 
+    el mismo extent geográfico y alineación de píxeles.
     """
     with rasterio.open(ruta_tif) as src:
-        # --- Transformar AOI al CRS nativo del raster si es necesario --------
-        if _epsg_de_crs(src.crs) != AOI_CRS_EPSG:
-            bounds_raster = transform_bounds(
-                AOI_CRS, src.crs, *bounds_utm, densify_pts=21
-            )
+        # Calcular los límites del AOI en el CRS de destino (EPSG:32719)
+        minx, miny, maxx, maxy = bounds_utm
+        crs_destino = 'EPSG:32719'
+        
+        # 1. Definir dimensiones de salida.
+        if target_shape:
+            out_rows, out_cols = target_shape[0], target_shape[1]
         else:
-            bounds_raster = bounds_utm
-
-        window   = from_bounds(*bounds_raster, transform=src.transform)
-        out_rows = target_shape[0] if target_shape else round(window.height)
-        out_cols = target_shape[1] if target_shape else round(window.width)
-
-        data = src.read(
-            1,
-            window=window,
-            boundless=True,
-            fill_value=0,
-            out_shape=(out_rows, out_cols),
+            # Resolucion por defecto (30m x 30m)
+            out_cols = int((maxx - minx) / 30)
+            out_rows = int((maxy - miny) / 30)
+            
+        # 2. Crear la matriz de transformación exacta y rígida anclada a UTM 19S
+        # (CORRECCIÓN: Se usa transform_from_bounds en lugar de from_bounds)
+        transform_salida = transform_from_bounds(minx, miny, maxx, maxy, out_cols, out_rows)
+        
+        # 3. Crear matriz vacía para la imagen resultante
+        data = np.zeros((out_rows, out_cols), dtype=np.float32)
+        
+        # 4. Proyectar (Warping) los datos del origen a nuestra matriz rígida
+        reproject(
+            source=rasterio.band(src, 1),
+            destination=data,
+            src_transform=src.transform,
+            src_crs=src.crs,
+            dst_transform=transform_salida,
+            dst_crs=crs_destino,
             resampling=Resampling.bilinear,
+            src_nodata=src.nodata,
+            dst_nodata=0
         )
-
-        # Transform correcto: derivado de los bounds del área recortada en el
-        # CRS original y el tamaño real de salida (sin cálculo manual de escala)
-        transform_salida = transform_from_bounds(
-            *bounds_raster, out_cols, out_rows
-        )
-
-    return data.astype(np.float32), transform_salida, src.crs
+        
+    return data, transform_salida, rasterio.crs.CRS.from_string(crs_destino)
 
 
 def calcular_ndsi(banda_verde, banda_swir, nodata=-9999.0):

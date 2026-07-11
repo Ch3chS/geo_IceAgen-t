@@ -4,12 +4,14 @@ import numpy as np
 import plotly.express as px
 from pathlib import Path
 import re
+import geopandas as gpd 
 
 
 def run_clasificacion():
     """
     Dashboard Etapa 3: máscara binaria glaciar vs. roca/suelo con filtro
-    altitudinal FABDEM. Lee los rasters generados por analyze_glacier.py.
+    altitudinal FABDEM. Lee los rasters generados por analyze_glacier.py
+    y superpone la silueta oficial de la DGA.
     """
     st.markdown("""
         <style>
@@ -26,6 +28,20 @@ def run_clasificacion():
 
     BASE_DIR = Path(__file__).resolve().parents[2]
     CLAS_DIR = BASE_DIR / "data" / "processed" / "clasificacion"
+    DGA_VECTOR_PATH = BASE_DIR / "data" / "IPG_2022_v2" / "INV_PG_2022_v2.shp"
+
+    @st.cache_data
+    def cargar_poligono_dga():
+        """Carga, filtra y reproyecta el shapefile de la DGA una sola vez."""
+        if not DGA_VECTOR_PATH.exists():
+            return None
+        
+        inventario_dga = gpd.read_file(DGA_VECTOR_PATH)
+        echaurren_vector = inventario_dga[
+            inventario_dga['NOMBRE'].str.contains('Echaurren Norte', case=False, na=False)
+        ]
+        # Aseguramos el mismo CRS de los rasters
+        return echaurren_vector.to_crs(epsg=32719)
 
     @st.cache_data
     def obtener_lista_archivos(dir_sensor_str):
@@ -36,7 +52,6 @@ def run_clasificacion():
             st.stop()
 
         def extraer_datos(nombre):
-            # Busca los 8 dígitos de la fecha completa (ej: 19850125)
             match = re.search(r"(\d{8})", nombre)
             if match:
                 fecha_cruda = match.group(1)
@@ -45,7 +60,6 @@ def run_clasificacion():
                 return año, fecha_completa
             return None, None
 
-        # Guardamos el año, la fecha completa formateada y la ruta del archivo
         pares = []
         for p in archivos:
             año, f_completa = extraer_datos(p.name)
@@ -57,10 +71,15 @@ def run_clasificacion():
 
     @st.cache_data
     def cargar_array_clasif(ruta_str):
+        """Modificado para devolver también la transformada afín del raster."""
         with rasterio.open(ruta_str) as src:
             data = src.read(1).astype(float)
+            transform = src.transform  # Obtenemos la matriz de transformación espacial
         data[data == 255] = np.nan
-        return data
+        return data, transform
+
+    # Cargar el polígono oficial
+    dga_poly = cargar_poligono_dga()
 
     col_map, col_controls = st.columns([4, 1])
 
@@ -84,7 +103,8 @@ def run_clasificacion():
         idx = años.index(año_seleccionado)
         fecha_exacta = fechas_completas[idx]
         ruta         = rutas[idx]
-        clasif       = cargar_array_clasif(str(ruta))
+        # Ahora desempaquetamos también el transform
+        clasif, transform = cargar_array_clasif(str(ruta))
 
         px_glaciar = int(np.nansum(clasif == 1))
         px_validos = int(np.sum(~np.isnan(clasif)))
@@ -96,6 +116,8 @@ def run_clasificacion():
         st.write(f"**Píxeles glaciar:** {px_glaciar} / {px_validos}")
         st.markdown("**Filtros aplicados:**")
         st.markdown("• NDSI ≥ 0.4\n• Elevación ≥ 3 000 m s.n.m.")
+        st.markdown("**Vectores:**")
+        st.markdown("• &nbsp; Silueta Oficial DGA (Echaurren Norte)")
 
     titulo_placeholder.subheader(
         f"Clasificación Binaria Glaciar vs. Roca/Suelo — Glaciar Echaurren ({año_seleccionado})"
@@ -114,17 +136,48 @@ def run_clasificacion():
         )
         fig.update_traces(hovertemplate="Clase: %{z:.0f}<extra></extra>")
         
+        # --- POLÍGONO DGA ---
+        if dga_poly is not None and not dga_poly.empty:
+            inv_transform = ~transform
+            
+            for geom in dga_poly.geometry:
+                polygons = [geom] if geom.geom_type == 'Polygon' else geom.geoms
+                
+                for poly in polygons:
+                    x_esp, y_esp = poly.exterior.coords.xy
+                    cols, rows = [], []
+                    
+                    for x, y in zip(x_esp, y_esp):
+                        col, row = inv_transform * (x, y)
+                        cols.append(col)
+                        rows.append(row)
+                        
+                    # Validación: Solo dibujar si al menos un vértice del polígono 
+                    # cae dentro de los límites de la matriz raster.
+                    if (min(cols) < ancho and max(cols) > 0 and 
+                        min(rows) < alto and max(rows) > 0):
+                        
+                        fig.add_scatter(
+                            x=cols, y=rows,
+                            mode='lines',
+                            line=dict(color="#000000", width=2.5),
+                            name='Silueta DGA',
+                            hoverinfo='skip',
+                            showlegend=False
+                        )
+        # ----------------------------------
+
         fig.update_layout(
             coloraxis_colorbar=dict(
                 title="Simbología", 
-                thickness=18,        # Barra un poco más gruesa
+                thickness=18,
                 len=0.5,
                 yanchor="middle",
                 y=0.5,
                 tickvals=[0, 1], 
                 ticktext=["Roca / Suelo", "Glaciar"],
-                tickfont=dict(size=13),   # ¡CORREGIDO! Para el tamaño de "Glaciar" y "Roca / Suelo"
-                title_font=dict(size=14)  # ¡AÑADIDO! Por si quieres agrandar la palabra "Simbología"
+                tickfont=dict(size=13),
+                title_font=dict(size=14)
             ),
             xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, title=""),
             yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, title=""),
@@ -132,7 +185,7 @@ def run_clasificacion():
             height=800 
         )
 
-        # PASO 2: Agrandamos el Norte (size de 16 a 22 y ajustamos paddings)
+        # Norte
         fig.add_annotation(
             x=ancho * 0.92, y=alto * 0.08,
             xref="x", yref="y",
@@ -146,10 +199,9 @@ def run_clasificacion():
             borderpad=8
         )
 
-        # PASO 2: Agrandamos la Escala Gráfica
-        # Duplicamos el tamaño de la barra a 20 píxeles para que sea más visible
-        tamano_barra_px = 20 
-        texto_escala = "600 m" if sensor == "Landsat" else "200 m"
+        # Escala (Estandarizada a 30m/px)
+        tamano_barra_px = 20  # 20 px * 30 m = 600 metros
+        texto_escala = "600 m"  # Fijo para ambos sensores
         
         x_start = ancho * 0.05
         x_end = x_start + tamano_barra_px
@@ -158,7 +210,7 @@ def run_clasificacion():
         fig.add_shape(
             type="line",
             x0=x_start, y0=y_pos, x1=x_end, y1=y_pos,
-            line=dict(color="white", width=6), # Línea más gruesa (de 4 a 6)
+            line=dict(color="white", width=6),
             xref="x", yref="y"
         )
         fig.add_annotation(
@@ -166,12 +218,12 @@ def run_clasificacion():
             xref="x", yref="y",
             text=texto_escala,
             showarrow=False,
-            font=dict(size=14, color="white"), # Letra de la escala más grande (de 11 a 14)
+            font=dict(size=14, color="white"),
             bgcolor="rgba(0,0,0,0.6)",
             borderpad=3
         )
 
-        # PASO 2: Agrandamos el bloque de información técnica inferior (size de 10 a 13)
+        # Metadatos Inferiores
         texto_metadatos = f"<b>CRS:</b> EPSG:32719 (WGS84 / UTM 19S) | <b>Fuente:</b> DGA, FABDEM | <b>Fecha:</b> {fecha_exacta}"
         fig.add_annotation(
             x=ancho * 0.5, y=alto * 0.97,
@@ -184,7 +236,6 @@ def run_clasificacion():
             borderpad=6
         )
 
-        # Mantenemos el menú de opciones activo como solicitaste antes
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": True})
 
     st.caption(f"Ruta de almacenamiento local: `{CLAS_DIR / subdir}`")
