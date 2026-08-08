@@ -1,7 +1,13 @@
 # Entorno virtual local
 /.env
 
+# Caché de bytecode de Python
+__pycache__/
+*.py[cod]
+
 /data/raw/fabdem
 /data/raw/sentinel2
 /data/raw/landsat
+/data/raw/DGA/caudal_diario_historico.txt
+/data/raw/DGA/caudal_medio_mensual_historico.txt
 /data/processed

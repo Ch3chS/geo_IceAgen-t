@@ -6,7 +6,7 @@ st.sidebar.title("Navegación")
 opcion = st.sidebar.radio(
     "Elige un dashboard:",
     ("Inicio", "NDSI Sentinel-2", "NDSI Landsat",
-     "Clasificación", "Polígonos", "Retroceso")
+     "Clasificación", "Polígonos", "Retroceso", "Correlación DGA")
 )
 
 if opcion == "Inicio":
@@ -28,6 +28,9 @@ if opcion == "Inicio":
     - **Retroceso**: Series temporales independientes por sensor (Landsat y
       Sentinel-2) con delta acumulado, mediana por década y tasa de retroceso.
       Los resultados se leen de los CSVs generados por `analyze_glacier.py`.
+    - **Correlación DGA**: Correlación de Pearson entre el área glaciar del
+      pipeline y el caudal estival (DJF) de las estaciones DGA del Río Yeso,
+      con control de tendencia (r detrended).
     """)
 
 elif opcion == "NDSI Sentinel-2":
@@ -49,6 +52,10 @@ elif opcion == "Polígonos":
 elif opcion == "Retroceso":
     from pages_.retroceso import run_retroceso
     run_retroceso()
+
+elif opcion == "Correlación DGA":
+    from pages_.correlacion import run_correlacion
+    run_correlacion()
 
 else:
     st.info("Próximamente: nuevos dashboards para análisis glaciar.")

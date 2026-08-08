@@ -59,6 +59,28 @@ DECADAS = [(1985, 1994), (1995, 2004), (2005, 2014), (2015, 2025)]
 # Con 5 años (±2) se suaviza la variabilidad interanual sin ocultar tendencias.
 VENTANA_MEDIA_MOVIL = 5
 
+# ----------------------------------------------------------------------------
+# Caudal DGA (Etapa 5)
+# ----------------------------------------------------------------------------
+# El glaciar Echaurren drena al Río Yeso, por lo que la estación
+# hidrológicamente correcta es la 05703006, ubicada sobre el estero del propio
+# glaciar (señal pura de deshielo glaciar). Sin embargo, su cobertura termina
+# en 2004 (vacío de la cuenca del Yeso en 2005-2023), por lo que se incluye
+# además la estación 05704002 (Río Maipo en San Alfonso), aguas abajo de la
+# confluencia del Yeso, que extiende el solapamiento con Landsat hasta 2016.
+DGA_MENSUAL_PATH = BASE_DIR / "data" / "raw" / "DGA" / "caudal_medio_mensual_estaciones.csv"
+
+DGA_ESTACIONES = {
+    "05703006": "Estero Glaciar Echaurren Norte",
+    "05704002": "Río Maipo en San Alfonso",
+}
+
+# Meses de la temporada de deshielo (verano estival austral): diciembre del año
+# anterior + enero y febrero del año de la imagen. La imagen Landsat es de
+# ~26 de enero, por lo que corresponde al mismo verano hidrológico.
+MESES_ESTIVOS = [12, 1, 2]
+MIN_MESES_ESTIVOS = 2   # regla de completitud: al menos 2 de 3 meses DJF
+
 for d in [CLAS_DIR, VECTOR_DIR, OUT_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
@@ -440,6 +462,183 @@ def analisis_decadas_sensor(serie, sensor):
 
 
 # ============================================================================
+# ETAPA 5 — CORRELACIÓN CON CAUDAL DGA
+# ============================================================================
+
+def leer_caudal_dga(ruta=DGA_MENSUAL_PATH, codigo="05703006"):
+    """
+    Lee el caudal medio mensual de una estación DGA.
+
+    El código de estación viene con ceros a la izquierda (p. ej. "05703006"),
+    por lo que se lee como texto para no perderlos.
+    """
+    df = pd.read_csv(ruta, dtype={"CODIGO ESTACION": str})
+    sub = df[df["CODIGO ESTACION"].str.strip() == codigo].copy()
+    if sub.empty:
+        logging.warning(f"DGA: sin datos para la estación {codigo}")
+        return pd.DataFrame(columns=["Año", "Mes", "Caudal_Medio_mensual"])
+    return sub[["Año", "Mes", "Caudal_Medio_mensual"]]
+
+
+def caudal_estival_djf(df, año_imagen):
+    """
+    Caudal estival DJF para el año hidrológico de una imagen de ~26 de enero.
+
+    El verano austral (dic-ene-feb) cruza dos años civiles: diciembre del año
+    anterior y enero-febrero del año de la imagen. Se calcula el promedio de
+    los meses presentes con al menos MIN_MESES_ESTIVOS (2 de 3) para evitar
+    promediar con meses faltantes. Devuelve NaN si no hay datos suficientes.
+    """
+    dic = df[(df["Año"] == año_imagen - 1) & (df["Mes"] == 12)]
+    ene = df[(df["Año"] == año_imagen) & (df["Mes"] == 1)]
+    feb = df[(df["Año"] == año_imagen) & (df["Mes"] == 2)]
+
+    valores = pd.concat([dic["Caudal_Medio_mensual"],
+                         ene["Caudal_Medio_mensual"],
+                         feb["Caudal_Medio_mensual"]], ignore_index=True)
+    valores = pd.to_numeric(valores, errors="coerce").dropna()
+
+    if len(valores) < MIN_MESES_ESTIVOS:
+        return float("nan")
+    return float(valores.mean())
+
+
+def _residuos_detrended(x, y):
+    """Elimina la tendencia lineal temporal de cada serie (residuos)."""
+    x_arr = np.asarray(x, dtype=float)
+    y_arr = np.asarray(y, dtype=float)
+    if len(x_arr) < 3:
+        return y_arr, np.full_like(y_arr, np.nan)
+    pend, inter = np.polyfit(x_arr, y_arr, 1)
+    return y_arr, y_arr - (pend * x_arr + inter)
+
+
+def correlacion_pearson():
+    """
+    Correlación de Pearson entre área glaciar (pipeline) y caudal estival DGA.
+
+    Alineación temporal: la imagen de ~26 de enero del año A se empareja con el
+    caudal DJF del mismo año hidrológico (dic A-1 + ene A + feb A), por lo que
+    ambos describen el mismo verano.
+
+    Control anti-artefacto: además del coeficiente crudo se reporta la
+    correlación sobre los RESIDUOS de quitar la tendencia temporal a ambas
+    series. Esto es necesario porque área y caudal co-decrecen a lo largo de
+    las décadas (retroceso glaciar + sequía), lo que puede inflar artificialmente
+    el r de Pearson. La correlación detrended mide si las ANOMALÍAS interanuales
+    de un año correlacionan con las del otro.
+    """
+    logging.info("===== ETAPA 5: CORRELACIÓN CON CAUDAL DGA =====")
+    serie = pd.read_csv(OUT_DIR / "serie_temporal_landsat.csv")
+
+    rows_caudal = []
+    rows_corr   = []
+    caudales_por_estacion = {}
+
+    for codigo, nombre in DGA_ESTACIONES.items():
+        df_caudal = leer_caudal_dga(DGA_MENSUAL_PATH, codigo)
+        caud = []
+        for año in serie["año"]:
+            caud.append((año, caudal_estival_djf(df_caudal, int(año))))
+        df_caud = pd.DataFrame(caud, columns=["año", "caudal_djf_m3s"])
+        df_caud["codigo_estacion"] = codigo
+        df_caud["nombre_estacion"] = nombre
+        rows_caudal.append(df_caud)
+        caudales_por_estacion[codigo] = df_caud
+
+        # Join área glaciar ~ caudal por año
+        joined = serie.merge(df_caud, on="año", how="inner")
+        joined = joined.dropna(subset=["caudal_djf_m3s"])
+
+        if len(joined) < 3:
+            logging.warning(
+                f"  {codigo}: solo {len(joined)} años con caudal — sin correlación")
+            continue
+
+        años = joined["año"].values.astype(float)
+
+        # Variables del pipeline a correlacionar. media_movil_km2 suaviza el
+        # ruido interanual (nieve transitoria) y se incluye para robustez.
+        variables = ["area_total_km2", "delta_largo_plazo_km2", "media_movil_km2"]
+        variables = [v for v in variables if v in joined.columns]
+
+        for var in variables:
+            glac = joined[var].values.astype(float)
+
+            # Pearson crudo
+            r, p = stats.pearsonr(glac, joined["caudal_djf_m3s"].values)
+            # Correlación detrended (residuos tras quitar tendencia temporal)
+            _, res_glac   = _residuos_detrended(años, glac)
+            _, res_caudal = _residuos_detrended(años, joined["caudal_djf_m3s"].values)
+            r_det, p_det  = stats.pearsonr(res_glac, res_caudal)
+
+            rows_corr.append({
+                "codigo_estacion": codigo,
+                "nombre_estacion": nombre,
+                "variable":        var,
+                "n":               len(joined),
+                "año_inicio":      int(años.min()),
+                "año_fin":         int(años.max()),
+                "r":               round(r, 4),
+                "p_valor":         float(p),
+                "r_detrended":     round(r_det, 4),
+                "p_detrended":     float(p_det),
+                "subperiodo":      "completo",
+            })
+            logging.info(
+                f"  {codigo} | {var}: n={len(joined)} r={r:.4f} (p={p:.4f})  "
+                f"detrended r={r_det:.4f} (p={p_det:.4f})"
+            )
+
+        # ── Robustez: ¿la fuerza del Maipo viene solo del periodo muestreado? ──
+        # El estero (05703006) termina en 2004, por lo que su correlación usa
+        # solo 1985-2004. Para descartar que la diferencia estero vs Maipo se
+        # deba exclusivamente al periodo, se recalcula el r del Maipo restringido
+        # a los años donde el estero tiene caudal (mismo subperiodo).
+        if codigo == "05704002" and "05703006" in caudales_por_estacion:
+            sub_estero = caudales_por_estacion["05703006"]
+            años_estero = set(sub_estero.loc[
+                sub_estero["caudal_djf_m3s"].notna(), "año"])
+            joined_sub = joined[joined["año"].isin(años_estero)]
+            if len(joined_sub) >= 3:
+                años_sub = joined_sub["año"].values.astype(float)
+                for var in variables:
+                    glac = joined_sub[var].values.astype(float)
+                    r, p = stats.pearsonr(glac, joined_sub["caudal_djf_m3s"].values)
+                    _, res_glac   = _residuos_detrended(años_sub, glac)
+                    _, res_caudal = _residuos_detrended(
+                        años_sub, joined_sub["caudal_djf_m3s"].values)
+                    r_det, p_det  = stats.pearsonr(res_glac, res_caudal)
+                    rows_corr.append({
+                        "codigo_estacion": codigo,
+                        "nombre_estacion": nombre,
+                        "variable":        var,
+                        "n":               len(joined_sub),
+                        "año_inicio":      int(años_sub.min()),
+                        "año_fin":         int(años_sub.max()),
+                        "r":               round(r, 4),
+                        "p_valor":         float(p),
+                        "r_detrended":     round(r_det, 4),
+                        "p_detrended":     float(p_det),
+                        "subperiodo":      "solape_estero",
+                    })
+                    logging.info(
+                        f"  {codigo} | {var} [solo años con estero]: "
+                        f"n={len(joined_sub)} r={r:.4f} (p={p:.4f})"
+                    )
+
+    if rows_caudal:
+        pd.concat(rows_caudal, ignore_index=True).to_csv(
+            OUT_DIR / "caudal_dga_djf.csv", index=False, encoding="utf-8")
+        logging.info("  ✓ caudal_dga_djf.csv")
+
+    if rows_corr:
+        pd.DataFrame(rows_corr).to_csv(
+            OUT_DIR / "correlacion_pearson.csv", index=False, encoding="utf-8")
+        logging.info("  ✓ correlacion_pearson.csv")
+
+
+# ============================================================================
 # GUARDADO DE RESULTADOS
 # ============================================================================
 
@@ -491,6 +690,7 @@ def main():
         decadas_dict[sensor] = dec
 
     guardar_resultados(series_dict, decadas_dict)
+    correlacion_pearson()
     logging.info("===== PROCESAMIENTO FINALIZADO =====")
 
 

@@ -1,0 +1,10 @@
+codigo_estacion,nombre_estacion,variable,n,año_inicio,año_fin,r,p_valor,r_detrended,p_detrended,subperiodo
+05703006,Estero Glaciar Echaurren Norte,area_total_km2,16,1985,2004,0.1572,0.5610485261064958,0.1171,0.6657942630536741,completo
+05703006,Estero Glaciar Echaurren Norte,delta_largo_plazo_km2,16,1985,2004,0.1572,0.5610499195348689,0.1171,0.6657958269315274,completo
+05703006,Estero Glaciar Echaurren Norte,media_movil_km2,16,1985,2004,-0.001,0.997116859346342,-0.0016,0.995305820490882,completo
+05704002,Río Maipo en San Alfonso,area_total_km2,25,1985,2016,0.812,8.325390650107284e-07,0.8093,9.682939238028775e-07,completo
+05704002,Río Maipo en San Alfonso,delta_largo_plazo_km2,25,1985,2016,0.812,8.325517500336673e-07,0.8093,9.683086324496221e-07,completo
+05704002,Río Maipo en San Alfonso,media_movil_km2,25,1985,2016,0.204,0.32806338334589974,0.1705,0.41524217240547784,completo
+05704002,Río Maipo en San Alfonso,area_total_km2,16,1985,2004,0.7806,0.00035913781133116527,0.7821,0.0003440746645269011,solape_estero
+05704002,Río Maipo en San Alfonso,delta_largo_plazo_km2,16,1985,2004,0.7806,0.0003591398118699449,0.7821,0.0003440766438020867,solape_estero
+05704002,Río Maipo en San Alfonso,media_movil_km2,16,1985,2004,0.1643,0.5431031317211514,0.1648,0.5420028588232307,solape_estero

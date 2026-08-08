@@ -416,6 +416,43 @@ def descargar_dem():
 
 
 # ============================================================================
+# DGA (best-effort)
+# ============================================================================
+# La DGA no expone una descarga automatizable estable (el BNA/SNIA es una app
+# JSF con flujos Ajax frágiles). El extracto con las estaciones de la Etapa 5
+# (05703006 Estero Glaciar Echaurren Norte, 05704002 Río Maipo en San Alfonso)
+# ya viene versionado en el repo, por lo que el pipeline funciona sin descarga.
+# Esta función solo regenera el extracto si el archivo nacional está disponible
+# en disco (descarga manual previa desde https://snia.mop.gob.cl/BNAConsultas).
+DGA_DIR      = RAW_DATA_DIR / "DGA"
+DGA_FULL     = DGA_DIR / "caudal_medio_mensual_historico.txt"
+DGA_EXTRACT  = DGA_DIR / "caudal_medio_mensual_estaciones.csv"
+DGA_CODIGOS  = ["05703006", "05704002"]
+
+
+def descargar_dga():
+    import pandas as pd
+
+    try:
+        if not DGA_FULL.exists():
+            logging.info(
+                "DGA: sin archivo nacional en disco; se mantiene el extracto "
+                "versionado (descarga manual opcional desde BNA/SNIA)."
+            )
+            return
+        df = pd.read_csv(DGA_FULL, dtype={"CODIGO ESTACION": str})
+        sub = df[df["CODIGO ESTACION"].str.strip().isin(DGA_CODIGOS)].copy()
+        DGA_DIR.mkdir(parents=True, exist_ok=True)
+        sub.to_csv(DGA_EXTRACT, index=False)
+        logging.info(
+            f"DGA: extracto actualizado con {len(sub)} filas "
+            f"({', '.join(DGA_CODIGOS)}) -> {DGA_EXTRACT.name}"
+        )
+    except Exception as e:
+        logging.error(f"DGA: no se pudo regenerar el extracto: {e}")
+
+
+# ============================================================================
 # MODO DEBUG
 # ============================================================================
 def obtener_rango_años_input():
@@ -492,6 +529,7 @@ def main():
     descargar_sentinel2()
     descargar_landsat()
     descargar_dem()
+    descargar_dga()
     logging.info("===== DESCARGA COMPLETADA =====")
 
 
