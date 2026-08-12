@@ -5,6 +5,9 @@
 __pycache__/
 *.py[cod]
 
+# Caché de pytest
+.pytest_cache/
+
 /data/raw/fabdem
 /data/raw/sentinel2
 /data/raw/landsat
