@@ -6,7 +6,8 @@ st.sidebar.title("Navegación")
 opcion = st.sidebar.radio(
     "Elige un dashboard:",
     ("Inicio", "NDSI Sentinel-2", "NDSI Landsat",
-     "Clasificación", "Polígonos", "Retroceso", "Correlación DGA")
+     "Clasificación", "Polígonos", "Retroceso", "Correlación DGA",
+     "Balance físico (snowmelt-rs)")
 )
 
 if opcion == "Inicio":
@@ -31,6 +32,11 @@ if opcion == "Inicio":
     - **Correlación DGA**: Correlación de Pearson entre el área glaciar del
       pipeline y el caudal estival (DJF) de las estaciones DGA del Río Yeso,
       con control de tendencia (r detrended).
+    - **Balance físico (snowmelt-rs)**: Segunda línea de evidencia
+      independiente — simula el balance de masa nival/glaciar con un modelo
+      físico (motor Rust `snowmelt-rs`) sobre el DEM y compara el
+      derretimiento/escorrentía simulados contra el caudal DGA, junto con la
+      altitud de la línea de equilibrio (ELA) estimada.
     """)
 
 elif opcion == "NDSI Sentinel-2":
@@ -56,6 +62,10 @@ elif opcion == "Retroceso":
 elif opcion == "Correlación DGA":
     from pages_.correlacion import run_correlacion
     run_correlacion()
+
+elif opcion == "Balance físico (snowmelt-rs)":
+    from pages_.snowmelt import run_snowmelt
+    run_snowmelt()
 
 else:
     st.info("Próximamente: nuevos dashboards para análisis glaciar.")

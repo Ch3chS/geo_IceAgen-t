@@ -13,4 +13,8 @@ __pycache__/
 /data/raw/landsat
 /data/raw/DGA/caudal_diario_historico.txt
 /data/raw/DGA/caudal_medio_mensual_historico.txt
+/data/raw/era5
 /data/processed
+
+# Toolchain y build de snowmelt-rs (motor externo clonado, no versionado)
+/snowmelt-rs/target
