@@ -1,0 +1,7 @@
+codigo_estacion,nombre_estacion,variable,n,año_inicio,año_fin,r,p_valor,r_detrended,p_detrended,subperiodo
+05403002,Río Aconcagua en Río Blanco,area_total_km2,38,1985,2026,0.4241,0.007968471351996968,0.3914,0.015108686879709171,completo
+05403002,Río Aconcagua en Río Blanco,delta_largo_plazo_km2,38,1985,2026,0.4241,0.007968471660442738,0.3914,0.015108666392155384,completo
+05403002,Río Aconcagua en Río Blanco,media_movil_km2,38,1985,2026,0.3824,0.017821525212794016,0.1521,0.36201449605596053,completo
+05410002,Río Aconcagua en Chacabuquito,area_total_km2,40,1985,2026,0.5344,0.00038224374997078685,0.5036,0.0009231854039951468,completo
+05410002,Río Aconcagua en Chacabuquito,delta_largo_plazo_km2,40,1985,2026,0.5344,0.0003822440735735628,0.5036,0.0009231854566669389,completo
+05410002,Río Aconcagua en Chacabuquito,media_movil_km2,40,1985,2026,0.3572,0.023651717408751487,0.2266,0.15971086603479534,completo

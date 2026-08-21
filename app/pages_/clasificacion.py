@@ -5,14 +5,21 @@ import plotly.express as px
 from pathlib import Path
 import re
 import geopandas as gpd 
+import sys
+
+BASE_DIR_APP = Path(__file__).resolve().parents[2]
+if str(BASE_DIR_APP) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR_APP))
+from scripts.glacier_config import get_config  # noqa: E402
 
 
-def run_clasificacion():
+def run_clasificacion(glaciar=None):
     """
     Dashboard Etapa 3: máscara binaria glaciar vs. roca/suelo con filtro
-    altitudinal FABDEM. Lee los rasters generados por analyze_glacier.py
+    altitudinal FABDEM. Lee los rasters generados por spatial_analysis.py
     y superpone la silueta oficial de la DGA.
     """
+    glaciar = glaciar or get_config("echaurren")
     st.markdown("""
         <style>
             .reportview-container .main .block-container {
@@ -27,21 +34,23 @@ def run_clasificacion():
     st.caption("Etapa 3 | Máscara binaria: NDSI ≥ 0.4 y elevación ≥ 3 000 m s.n.m. (FABDEM)")
 
     BASE_DIR = Path(__file__).resolve().parents[2]
-    CLAS_DIR = BASE_DIR / "data" / "processed" / "clasificacion"
+    CLAS_DIR = BASE_DIR / "data" / "processed" / glaciar.slug / "clasificacion"
     DGA_VECTOR_PATH = BASE_DIR / "data" / "IPG_2022_v2" / "INV_PG_2022_v2.shp"
 
     @st.cache_data
-    def cargar_poligono_dga():
-        """Carga, filtra y reproyecta el shapefile de la DGA una sola vez."""
+    def cargar_poligono_dga(nombre_dga, crs_epsg):
+        """Carga, filtra y reproyecta el shapefile de la DGA una sola vez.
+        Recibe nombre_dga/crs_epsg como argumentos para que la clave de caché
+        dependa del glaciar (st.cache_data no considera el closure)."""
         if not DGA_VECTOR_PATH.exists():
             return None
         
         inventario_dga = gpd.read_file(DGA_VECTOR_PATH)
-        echaurren_vector = inventario_dga[
-            inventario_dga['NOMBRE'].str.contains('Echaurren Norte', case=False, na=False)
+        glaciar_vector = inventario_dga[
+            inventario_dga['NOMBRE'].str.contains(nombre_dga, case=False, na=False)
         ]
         # Aseguramos el mismo CRS de los rasters
-        return echaurren_vector.to_crs(epsg=32719)
+        return glaciar_vector.to_crs(epsg=crs_epsg)
 
     @st.cache_data
     def obtener_lista_archivos(dir_sensor_str):
@@ -79,7 +88,7 @@ def run_clasificacion():
         return data, transform
 
     # Cargar el polígono oficial
-    dga_poly = cargar_poligono_dga()
+    dga_poly = cargar_poligono_dga(glaciar.nombre_dga, glaciar.crs_epsg)
 
     col_map, col_controls = st.columns([4, 1])
 
@@ -117,10 +126,10 @@ def run_clasificacion():
         st.markdown("**Filtros aplicados:**")
         st.markdown("• NDSI ≥ 0.4\n• Elevación ≥ 3 000 m s.n.m.")
         st.markdown("**Vectores:**")
-        st.markdown("• &nbsp; Silueta Oficial DGA (Echaurren Norte)")
+        st.markdown(f"• &nbsp; Silueta Oficial DGA ({glaciar.nombre_dga})")
 
     titulo_placeholder.subheader(
-        f"Clasificación Binaria Glaciar vs. Roca/Suelo — Glaciar Echaurren ({año_seleccionado})"
+        f"Clasificación Binaria Glaciar vs. Roca/Suelo — {glaciar.nombre} ({año_seleccionado})"
     )
 
     with col_map:
@@ -224,7 +233,7 @@ def run_clasificacion():
         )
 
         # Metadatos Inferiores
-        texto_metadatos = f"<b>CRS:</b> EPSG:32719 (WGS84 / UTM 19S) | <b>Fuente:</b> DGA, FABDEM | <b>Fecha:</b> {fecha_exacta}"
+        texto_metadatos = f"<b>CRS:</b> EPSG:{glaciar.crs_epsg} (WGS84 / UTM) | <b>Fuente:</b> DGA, FABDEM | <b>Fecha:</b> {fecha_exacta}"
         fig.add_annotation(
             x=ancho * 0.5, y=alto * 0.97,
             xref="x", yref="y",

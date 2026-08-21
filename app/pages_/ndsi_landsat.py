@@ -7,12 +7,19 @@ import plotly.express as px
 import geopandas as gpd # Importante para cargar el shapefile
 from pathlib import Path
 import re
+import sys
 
-def run_ndsi_landsat():
+BASE_DIR_APP = Path(__file__).resolve().parents[2]
+if str(BASE_DIR_APP) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR_APP))
+from scripts.glacier_config import get_config  # noqa: E402
+
+def run_ndsi_landsat(glaciar=None):
     """
     Dashboard interactivo para visualizar el índice NDSI calculado
-    a partir de imágenes Landsat procesadas del glaciar Echaurren.
+    a partir de imágenes Landsat procesadas del glaciar seleccionado.
     """
+    glaciar = glaciar or get_config("echaurren")
     st.markdown("""
         <style>
             .reportview-container .main .block-container {
@@ -27,23 +34,25 @@ def run_ndsi_landsat():
     st.caption("Índice NDSI desde Landsat (1985-2026) | Pasa el cursor sobre el mapa para ver valores")
 
     BASE_DIR = Path(__file__).resolve().parents[2]
-    PROCESSED_DIR = BASE_DIR / "data" / "processed" / "landsat"
+    PROCESSED_DIR = BASE_DIR / "data" / "processed" / glaciar.slug / "landsat"
     DGA_VECTOR_PATH = BASE_DIR / "data" / "IPG_2022_v2" / "INV_PG_2022_v2.shp"
 
     @st.cache_data
-    def cargar_poligono_dga():
-        """Carga, filtra y reproyecta el shapefile de la DGA una sola vez."""
+    def cargar_poligono_dga(nombre_dga, crs_epsg):
+        """Carga, filtra y reproyecta el shapefile de la DGA una sola vez.
+        Recibe nombre_dga/crs_epsg como argumentos para que la clave de caché
+        dependa del glaciar (st.cache_data no considera el closure)."""
         if not DGA_VECTOR_PATH.exists():
             return None
         inventario_dga = gpd.read_file(DGA_VECTOR_PATH)
-        echaurren_vector = inventario_dga[
-            inventario_dga['NOMBRE'].str.contains('Echaurren Norte', case=False, na=False)
+        glaciar_vector = inventario_dga[
+            inventario_dga['NOMBRE'].str.contains(nombre_dga, case=False, na=False)
         ]
-        return echaurren_vector.to_crs(epsg=32719)
+        return glaciar_vector.to_crs(epsg=crs_epsg)
 
     @st.cache_data
-    def obtener_lista_archivos():
-        archivos = list(PROCESSED_DIR.glob("landsat_ndsi_*.tif"))
+    def obtener_lista_archivos(slug):
+        archivos = list(PROCESSED_DIR.glob(f"{slug}_ndsi_*.tif"))
         if not archivos:
             st.error(f"No se encontraron archivos Landsat en {PROCESSED_DIR}")
             st.stop()
@@ -86,20 +95,21 @@ def run_ndsi_landsat():
             
             return data, h_new, w_new, nuevo_transform
 
-    dga_poly = cargar_poligono_dga()
-    datos_archivos = obtener_lista_archivos()
+    dga_poly = cargar_poligono_dga(glaciar.nombre_dga, glaciar.crs_epsg)
+    datos_archivos = obtener_lista_archivos(glaciar.slug)
     años             = [d[0] for d in datos_archivos]
     fechas_completas = [d[1] for d in datos_archivos]
     rutas            = [d[2] for d in datos_archivos]
 
-    if "ndsi_arrays_landsat" not in st.session_state:
-        st.session_state.ndsi_arrays_landsat = {}
+    _clave_arrays = f"ndsi_arrays_landsat_{glaciar.slug}"
+    if _clave_arrays not in st.session_state:
+        st.session_state[_clave_arrays] = {}
         with st.spinner("Precargando datos de Landsat (solo la primera vez)..."):
             for d in datos_archivos:
                 año = d[0]
                 ruta = d[2]
                 arr, h, w, transf = cargar_array_ndsi(ruta, escala=0.5)
-                st.session_state.ndsi_arrays_landsat[año] = (arr, h, w, transf)
+                st.session_state[_clave_arrays][año] = (arr, h, w, transf)
 
     col_map, col_controls = st.columns([4, 1])
 
@@ -116,7 +126,7 @@ def run_ndsi_landsat():
         fecha_exacta = fechas_completas[idx]
         ruta         = rutas[idx]
         # Desempaquetamos la matriz, el alto, el ancho y la transformada afín
-        ndsi_data, h, w, transform = st.session_state.ndsi_arrays_landsat[año_seleccionado]
+        ndsi_data, h, w, transform = st.session_state[_clave_arrays][año_seleccionado]
 
         st.markdown("### Metadatos")
         st.write(f"**Sensor:** Landsat")
@@ -128,10 +138,10 @@ def run_ndsi_landsat():
         st.markdown("• &nbsp; 0.1 a 0.4 → nieve parcial / sombras")
         st.markdown("• &nbsp; < 0 → sin nieve")
         st.markdown("**Vectores:**")
-        st.markdown("• &nbsp; Silueta Oficial DGA (Echaurren Norte)")
+        st.markdown(f"• &nbsp; Silueta Oficial DGA ({glaciar.nombre_dga})")
 
     titulo_placeholder.subheader(
-        f"Mapa de Índice de Nieve Diferencial Normalizado (NDSI) — Glaciar Echaurren ({año_seleccionado})"
+        f"Mapa de Índice de Nieve Diferencial Normalizado (NDSI) — {glaciar.nombre} ({año_seleccionado})"
     )
 
     with col_map:
@@ -233,7 +243,7 @@ def run_ndsi_landsat():
             borderpad=3
         )
 
-        texto_metadatos = f"<b>CRS:</b> EPSG:32719 (WGS84 / UTM 19S) | <b>Fuente:</b> DGA (Landsat) | <b>Fecha:</b> {fecha_exacta}"
+        texto_metadatos = f"<b>CRS:</b> EPSG:{glaciar.crs_epsg} (WGS84 / UTM) | <b>Fuente:</b> DGA (Landsat) | <b>Fecha:</b> {fecha_exacta}"
         fig.add_annotation(
             x=w * 0.5, y=h * 0.97,
             xref="x", yref="y",

@@ -8,6 +8,8 @@ Cada dataset tiene su propia función principal.
 """
 
 import logging
+import sys
+import tempfile
 import time
 import threading
 from pathlib import Path
@@ -30,15 +32,43 @@ logging.basicConfig(level=logging.INFO,
 BASE_DIR     = Path(__file__).resolve().parents[1]
 RAW_DATA_DIR = BASE_DIR / "data" / "raw"
 
-SENTINEL_DIR = RAW_DATA_DIR / "sentinel2"
-LANDSAT_DIR  = RAW_DATA_DIR / "landsat"
-DEM_DIR      = RAW_DATA_DIR / "fabdem"
+sys.path.insert(0, str(BASE_DIR))
+from scripts.glacier_config import get_config, parse_glacier_arg  # noqa: E402
 
-for d in [SENTINEL_DIR, LANDSAT_DIR, DEM_DIR]:
-    d.mkdir(parents=True, exist_ok=True)
+SENTINEL_DIR = RAW_DATA_DIR / "echaurren" / "sentinel2"
+LANDSAT_DIR  = RAW_DATA_DIR / "echaurren" / "landsat"
+DEM_DIR      = RAW_DATA_DIR / "echaurren" / "fabdem"
 
 BOUNDS      = (-70.15, -33.60, -70.11, -33.56)
 AOI_POLYGON = box(*BOUNDS)
+
+
+def configurar_glaciar(slug):
+    """
+    Ajusta las rutas y el área de estudio al glaciar `slug`.
+    Debe llamarse antes de cualquier descarga; por defecto (import) se
+    configura echaurren para mantener el comportamiento original.
+    """
+    global BOUNDS, AOI_POLYGON, SENTINEL_DIR, LANDSAT_DIR, DEM_DIR, DGA_CODIGOS
+
+    cfg = get_config(slug)
+
+    BOUNDS      = cfg.bbox_wgs84
+    AOI_POLYGON = box(*BOUNDS)
+
+    SENTINEL_DIR = RAW_DATA_DIR / cfg.slug / "sentinel2"
+    LANDSAT_DIR  = RAW_DATA_DIR / cfg.slug / "landsat"
+    DEM_DIR      = RAW_DATA_DIR / cfg.slug / "fabdem"
+
+    for d in [SENTINEL_DIR, LANDSAT_DIR, DEM_DIR]:
+        d.mkdir(parents=True, exist_ok=True)
+
+    DGA_CODIGOS = list(cfg.dga_estaciones.keys())
+    logging.info(f"Glaciar configurado: {cfg.nombre} (slug={cfg.slug})")
+
+
+for _d in [SENTINEL_DIR, LANDSAT_DIR, DEM_DIR]:
+    _d.mkdir(parents=True, exist_ok=True)
 
 # ── Parámetros de descarga ────────────────────────────────────────────────
 MAX_RETRIES = 3
@@ -381,13 +411,29 @@ def descargar_dem():
         import rasterio
         from rasterio.merge import merge as rio_merge
 
-        try:
-            fabdem.download(BOUNDS, output_path=str(out_path), show_progress=True)
-        except TypeError:
-            pass
+        # Caché por glaciar (nombre derivado de la carpeta del DEM) y portable
+        # a Windows (tempfile.gettempdir() en vez de /tmp).
+        cache_dir = (Path(tempfile.gettempdir())
+                     / f"fabdem-cache-{DEM_DIR.parent.name}")
+        cache_dir.mkdir(parents=True, exist_ok=True)
 
-        cache_dir = Path("/tmp/fabdem-cache")
-        tiles     = sorted(cache_dir.glob("**/*.tif"))
+        try:
+            fabdem.download(BOUNDS, output_path=str(out_path),
+                            show_progress=True, cache=cache_dir)
+        except TypeError:
+            # Versiones antiguas de fabdem sin parámetro `cache`: la librería
+            # usa un caché por defecto en el tempdir del OS.
+            logging.warning("fabdem.download sin parámetro 'cache'; "
+                            "usando el caché por defecto de la librería.")
+            cache_dir = Path(tempfile.gettempdir()) / "fabdem-cache"
+            try:
+                fabdem.download(BOUNDS, output_path=str(out_path))
+            except Exception as e:
+                logging.warning(f"fabdem.download no completó el archivo ({e})")
+        except Exception as e:
+            logging.warning(f"fabdem.download no completó el archivo ({e})")
+
+        tiles = sorted(cache_dir.glob("**/*.tif"))
         if not tiles:
             raise Exception("No se encontraron tiles en caché de FABDEM")
 
@@ -420,14 +466,14 @@ def descargar_dem():
 # ============================================================================
 # La DGA no expone una descarga automatizable estable (el BNA/SNIA es una app
 # JSF con flujos Ajax frágiles). El extracto con las estaciones de la Etapa 5
-# (05703006 Estero Glaciar Echaurren Norte, 05704002 Río Maipo en San Alfonso)
-# ya viene versionado en el repo, por lo que el pipeline funciona sin descarga.
+# (Maipo para Echaurren, Aconcagua para Juncal) ya viene versionado en el repo,
+# por lo que el pipeline funciona sin descarga.
 # Esta función solo regenera el extracto si el archivo nacional está disponible
 # en disco (descarga manual previa desde https://snia.mop.gob.cl/BNAConsultas).
 DGA_DIR      = RAW_DATA_DIR / "DGA"
 DGA_FULL     = DGA_DIR / "caudal_medio_mensual_historico.txt"
 DGA_EXTRACT  = DGA_DIR / "caudal_medio_mensual_estaciones.csv"
-DGA_CODIGOS  = ["05703006", "05704002"]
+DGA_CODIGOS  = ["05703006", "05704002"]  # default: estaciones de Echaurren
 
 
 def descargar_dga():
@@ -525,6 +571,8 @@ def ejecutar_debug():
 # ============================================================================
 def main():
     logging.info("===== INICIANDO DESCARGA =====")
+    slug = parse_glacier_arg()
+    configurar_glaciar(slug)
     # ejecutar_debug()
     descargar_sentinel2()
     descargar_landsat()

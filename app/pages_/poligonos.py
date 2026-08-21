@@ -10,10 +10,17 @@ import numpy as np
 
 # Patrón de fecha consistente con spatial_analysis.py
 import re
+import sys
 _RE_FECHA_NOMBRE = re.compile(r'(?:^|_)(\d{4})(\d{2})(\d{2})(?:_|\.)')
 
+BASE_DIR_APP = Path(__file__).resolve().parents[2]
+if str(BASE_DIR_APP) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR_APP))
+from scripts.glacier_config import get_config  # noqa: E402
 
-def run_poligonos():
+
+def run_poligonos(glaciar=None):
+    glaciar = glaciar or get_config("echaurren")
     st.markdown("""
         <style>
             .reportview-container .main .block-container {
@@ -24,18 +31,19 @@ def run_poligonos():
 
     st.subheader("Polígonos glaciares — Extensión y variación")
     st.caption(
-        "Etapa 3 | Polígonos vectoriales generados a partir de las máscaras NDSI "
+        f"Etapa 3 | {glaciar.nombre} | "
+        "Polígonos vectoriales generados a partir de las máscaras NDSI "
         "con filtro FABDEM ≥ 3 000 m s.n.m. | "
         "Color: Δ área de largo plazo respecto al año base del sensor"
     )
 
     BASE_DIR   = Path(__file__).resolve().parents[2]
-    VECTOR_DIR = BASE_DIR / "data" / "processed" / "vectores"
-    OUT_DIR    = BASE_DIR / "outputs"
+    VECTOR_DIR = BASE_DIR / "data" / "processed" / glaciar.slug / "vectores"
+    OUT_DIR    = BASE_DIR / "outputs" / glaciar.slug
 
     # ── Verificar archivos ───────────────────────────────────────────────────
-    gpkg_ls = VECTOR_DIR / "glaciar_echaurren_landsat.gpkg"
-    gpkg_s2 = VECTOR_DIR / "glaciar_echaurren_sentinel2.gpkg"
+    gpkg_ls = VECTOR_DIR / f"glaciar_{glaciar.slug}_landsat.gpkg"
+    gpkg_s2 = VECTOR_DIR / f"glaciar_{glaciar.slug}_sentinel2.gpkg"
 
     disponibles = {
         "Landsat":    gpkg_ls if gpkg_ls.exists() else None,

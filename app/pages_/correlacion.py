@@ -4,11 +4,12 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from pathlib import Path
+import sys
 
-ESTACIONES = {
-    "05703006": "Estero Glaciar Echaurren Norte",
-    "05704002": "Río Maipo en San Alfonso",
-}
+BASE_DIR_APP = Path(__file__).resolve().parents[2]
+if str(BASE_DIR_APP) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR_APP))
+from scripts.glacier_config import get_config  # noqa: E402
 
 
 def _fig_scatter(joined, var, estacion_nombre):
@@ -68,7 +69,9 @@ def _fig_serie(joined, var, estacion_nombre):
     return fig
 
 
-def run_correlacion():
+def run_correlacion(glaciar=None):
+    glaciar = glaciar or get_config("echaurren")
+    estaciones = glaciar.dga_estaciones
     st.markdown("""
         <style>
             .reportview-container .main .block-container {
@@ -79,12 +82,13 @@ def run_correlacion():
 
     st.subheader("Correlación área glaciar — caudal DGA")
     st.caption(
-        "Etapa 5 | Correlación de Pearson entre el área glaciar del pipeline y "
+        f"Etapa 5 | {glaciar.nombre} | "
+        "Correlación de Pearson entre el área glaciar del pipeline y "
         "el caudal estival (DJF) de la DGA, alineados al mismo año hidrológico."
     )
 
     BASE_DIR = Path(__file__).resolve().parents[2]
-    OUT_DIR  = BASE_DIR / "outputs"
+    OUT_DIR  = BASE_DIR / "outputs" / glaciar.slug
 
     SERIE   = OUT_DIR / "serie_temporal_landsat.csv"
     CAUDAL  = OUT_DIR / "caudal_dga_djf.csv"
@@ -118,8 +122,8 @@ def run_correlacion():
     # ── Selector de estación ────────────────────────────────────────────────
     estacion = st.selectbox(
         "Estación DGA",
-        list(ESTACIONES.keys()),
-        format_func=lambda c: f"{c} — {ESTACIONES[c]}",
+        list(estaciones.keys()),
+        format_func=lambda c: f"{c} — {estaciones[c]}",
         key="corr_estacion"
     )
 
@@ -175,11 +179,11 @@ def run_correlacion():
     # ── Scatter con regresión ───────────────────────────────────────────────
     st.markdown("#### Área glaciar vs caudal estival")
     st.caption(
-        f"Variable: área glaciar total (km²) · {ESTACIONES[estacion]} · "
+        f"Variable: área glaciar total (km²) · {estaciones[estacion]} · "
         f"{int(fila['año_inicio'])}–{int(fila['año_fin'])}"
     )
     st.plotly_chart(
-        _fig_scatter(joined, "area_total_km2", ESTACIONES[estacion]),
+        _fig_scatter(joined, "area_total_km2", estaciones[estacion]),
         use_container_width=True, config={'displayModeBar': True}
     )
 
@@ -190,7 +194,7 @@ def run_correlacion():
         "DJF del mismo verano (dic A−1 + ene A + feb A)."
     )
     st.plotly_chart(
-        _fig_serie(joined, "area_total_km2", ESTACIONES[estacion]),
+        _fig_serie(joined, "area_total_km2", estaciones[estacion]),
         use_container_width=True, config={'displayModeBar': True}
     )
 
@@ -219,37 +223,30 @@ def run_correlacion():
 
     # ── Nota metodológica ───────────────────────────────────────────────────
     st.markdown("#### Notas y limitaciones")
-    st.markdown("""
-    - **05703006 Estero Glaciar Echaurren Norte**: estación sobre el estero del
-      propio glaciar (cuenca del Río Yeso), señal hidrológicamente directa.
-      Cobertura 1976–2004 → solo se correlaciona con Landsat 1985–2004 (16 años).
-      Resultado: r=0.15, **no significativo**. La señal glaciar directa es débil
-      y ruidosa en este registro.
-    - **05704002 Río Maipo en San Alfonso**: aguas abajo de la confluencia del
-      Yeso; integra la cuenca, extendiendo el solapamiento con Landsat hasta
-      2016 (25 años). Resultado: r=0.81, p=8.4×10⁻⁷, **significativo incluso
-      detrended** (r=0.81).
-    - **Interpretación crítica**: el área NDSI de ~26 de enero captura **nieve
-      transitoria**, no solo hielo glaciar permanente. En años húmedos hay más
-      nieve acumulada → área NDSI inflada Y más escorrentía estival. Por eso el
-      r del Maipo refleja la co-variación **nieve↔escorrentía del mismo año
-      hidrológico**, no la contribución del derretimiento glaciar.
-    - **El estero no confirma la señal glaciar**: en el propio estero (que sí
-      mide el derrame inmediato del glaciar) la correlación no es significativa.
-      Años con área NDSI enorme por nieve (p. ej. 1987: 4.69 km²) no producen
-      un repunte proporcional del estero.
-    - **Robustez**: restringiendo el Maipo a los mismos años del estero
-      (1985–2004, n=16) el r se mantiene alto (0.78) → la diferencia no se debe
-      al periodo ni al n. La variable `media_movil_km2` (suavizada) NO mejora la
-      correlación de ninguna estación.
-    - **Chequeos adicionales (Maipo)**: Spearman r=0.81 y Pearson log-log=0.79
-      (no depende de outliers ni de la forma funcional); jackknife r∈[0.78,0.84]
-      (ningún año sostiene la correlación); con n_efectivo≈20 por autocorrelación,
-      p ajustado ≈1.3×10⁻⁵ (sigue significativo). La correlación es **real**, pero
-      su interpretación sigue siendo nieve↔escorrentía, no hielo glaciar.
-    - **Vacío 2005–2023 en la cuenca del Yeso**: no hay estación de esa cuenca
-      en el periodo de Sentinel-2 (2016–2024), por lo que **no es posible
-      correlacionar Sentinel-2** con el caudal de la cuenca correcta.
-    - La correlación **detrended** es la interpretable: elimina el efecto de que
-      ambas series tienden a decrecer juntas por retroceso + sequía.
-    """)
+    codigos = list(estaciones.keys())
+    directa = codigos[0] if codigos else None
+    integradora = codigos[1] if len(codigos) > 1 else None
+    notas = []
+    if directa:
+        notas.append(
+            f"- **{estaciones[directa]} ({directa})**: estación de la cuenca del "
+            f"glaciar — señal hidrológicamente directa de su drenaje."
+        )
+    if integradora:
+        notas.append(
+            f"- **{estaciones[integradora]} ({integradora})**: estación integradora "
+            f"aguas abajo de la cuenca; extiende el solapamiento temporal con Landsat."
+        )
+    notas += [
+        "- **Interpretación crítica**: el área NDSI de ~26 de enero captura **nieve "
+        "transitoria**, no solo hielo glaciar permanente. En años húmedos hay más "
+        "nieve acumulada → área NDSI inflada Y más escorrentía estival. Por eso la "
+        "correlación puede reflejar la co-variación **nieve↔escorrentía del mismo "
+        "año hidrológico**, no la contribución del derretimiento glaciar.",
+        "- **Vacío de cobertura**: si la estación de la cuenca correcta no está "
+        "disponible en el periodo de Sentinel-2, no es posible correlacionar "
+        "Sentinel-2 con el caudal de la cuenca correcta.",
+        "- La correlación **detrended** es la interpretable: elimina el efecto de que "
+        "ambas series tienden a decrecer juntas por retroceso + sequía.",
+    ]
+    st.markdown("\n".join(notas))

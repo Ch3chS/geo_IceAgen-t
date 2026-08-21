@@ -6,6 +6,12 @@ import plotly.graph_objects as go
 import plotly.express as px
 from pathlib import Path
 import re
+import sys
+
+BASE_DIR_APP = Path(__file__).resolve().parents[2]
+if str(BASE_DIR_APP) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR_APP))
+from scripts.glacier_config import get_config  # noqa: E402
 
 DECADAS = [(1985, 1994), (1995, 2004), (2005, 2014), (2015, 2025)]
 
@@ -19,7 +25,8 @@ def _año_de_ruta(nombre: str):
     return int(m.group(1)) if m and 1972 <= int(m.group(1)) <= 2100 else None
 
 
-def run_retroceso():
+def run_retroceso(glaciar=None):
+    glaciar = glaciar or get_config("echaurren")
     st.markdown("""
         <style>
             .reportview-container .main .block-container {
@@ -29,11 +36,13 @@ def run_retroceso():
     """, unsafe_allow_html=True)
 
     st.subheader("Retroceso glaciar — Área y tasa de retroceso")
-    st.caption("Etapa 4 | Filtro altitudinal FABDEM ≥ 3 000 m s.n.m.")
+    st.caption(
+        f"Etapa 4 | {glaciar.nombre} | Filtro altitudinal FABDEM ≥ 3 000 m s.n.m."
+    )
 
     BASE_DIR   = Path(__file__).resolve().parents[2]
-    OUT_DIR    = BASE_DIR / "outputs"
-    CLAS_DIR   = BASE_DIR / "data" / "processed" / "clasificacion"
+    OUT_DIR    = BASE_DIR / "outputs" / glaciar.slug
+    CLAS_DIR   = BASE_DIR / "data" / "processed" / glaciar.slug / "clasificacion"
 
     SERIE_LS   = OUT_DIR / "serie_temporal_landsat.csv"
     SERIE_S2   = OUT_DIR / "serie_temporal_sentinel2.csv"
@@ -44,7 +53,7 @@ def run_retroceso():
     if faltantes:
         st.error(
             "No se encontraron los CSVs de series temporales. "
-            "Ejecuta primero `scripts/analyze_glacier.py`.\n\n"
+            "Ejecuta primero `scripts/spatial_analysis.py`.\n\n"
             + "\n".join(f"- `{p.name}`" for p in faltantes)
         )
         st.stop()

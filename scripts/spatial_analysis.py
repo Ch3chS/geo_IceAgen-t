@@ -9,6 +9,7 @@ Etapa 4 — Series temporales independientes por sensor con delta acumulado
 
 import logging
 import re
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -29,21 +30,26 @@ logging.basicConfig(level=logging.INFO,
 # ============================================================================
 BASE_DIR = Path(__file__).resolve().parents[1]
 
-PROC_DIR  = BASE_DIR / "data" / "processed"
+sys.path.insert(0, str(BASE_DIR))
+from scripts.glacier_config import get_config, parse_glacier_arg  # noqa: E402
+
+PROC_DIR  = BASE_DIR / "data" / "processed" / "echaurren"
 NDSI_DIRS = {
     "landsat":   PROC_DIR / "landsat",
     "sentinel2": PROC_DIR / "sentinel2",
 }
 CLAS_DIR   = PROC_DIR / "clasificacion"
 VECTOR_DIR = PROC_DIR / "vectores"
-OUT_DIR    = BASE_DIR / "outputs"
+OUT_DIR    = BASE_DIR / "outputs" / "echaurren"
 
-DEM_PATH = BASE_DIR / "data" / "raw" / "fabdem" / "fabdem_dem.tif"
+DEM_PATH = BASE_DIR / "data" / "raw" / "echaurren" / "fabdem" / "fabdem_dem.tif"
 
 UMBRAL_NDSI = 0.4
 ELEV_MIN_M  = 3000
 AREA_MIN_M2 = 5_000
-CRS_SALIDA  = "EPSG:32719"
+CRS_SALIDA      = "EPSG:32719"
+CRS_SALIDA_EPSG = 32719
+SLUG            = "echaurren"
 
 NODATA_IN  = -9999.0
 NODATA_OUT = 255
@@ -83,6 +89,45 @@ MIN_MESES_ESTIVOS = 2   # regla de completitud: al menos 2 de 3 meses DJF
 
 for d in [CLAS_DIR, VECTOR_DIR, OUT_DIR]:
     d.mkdir(parents=True, exist_ok=True)
+
+
+def configurar_glaciar(slug):
+    """
+    Ajusta rutas, umbrales, CRS, estaciones DGA y nombres de salida al glaciar
+    `slug`. Por defecto (import) se configura echaurren para mantener el
+    comportamiento original.
+    """
+    global PROC_DIR, NDSI_DIRS, CLAS_DIR, VECTOR_DIR, OUT_DIR
+    global DEM_PATH, UMBRAL_NDSI, ELEV_MIN_M, AREA_MIN_M2
+    global CRS_SALIDA, CRS_SALIDA_EPSG, SLUG
+    global DGA_ESTACIONES
+
+    cfg = get_config(slug)
+
+    PROC_DIR  = BASE_DIR / "data" / "processed" / cfg.slug
+    NDSI_DIRS = {
+        "landsat":   PROC_DIR / "landsat",
+        "sentinel2": PROC_DIR / "sentinel2",
+    }
+    CLAS_DIR   = PROC_DIR / "clasificacion"
+    VECTOR_DIR = PROC_DIR / "vectores"
+    OUT_DIR    = BASE_DIR / "outputs" / cfg.slug
+
+    DEM_PATH = BASE_DIR / "data" / "raw" / cfg.slug / "fabdem" / "fabdem_dem.tif"
+
+    UMBRAL_NDSI = cfg.umbral_ndsi
+    ELEV_MIN_M  = cfg.elev_min_m
+    AREA_MIN_M2 = cfg.area_min_m2
+    CRS_SALIDA      = f"EPSG:{cfg.crs_epsg}"
+    CRS_SALIDA_EPSG = cfg.crs_epsg
+    SLUG            = cfg.slug
+
+    DGA_ESTACIONES = cfg.dga_estaciones
+
+    for d in [CLAS_DIR, VECTOR_DIR, OUT_DIR]:
+        d.mkdir(parents=True, exist_ok=True)
+
+    logging.info(f"Glaciar configurado: {cfg.nombre} (slug={cfg.slug})")
 
 
 # ============================================================================
@@ -199,7 +244,7 @@ def vectorizar_raster(ruta_clasif, sensor, año):
 
     gdf = gpd.GeoDataFrame({'geometry': geoms}, crs=crs)
 
-    if gdf.crs.to_epsg() != 32719:
+    if gdf.crs.to_epsg() != CRS_SALIDA_EPSG:
         gdf = gdf.to_crs(CRS_SALIDA)
 
     gdf['area_m2'] = gdf.geometry.area
@@ -236,7 +281,7 @@ def vectorizar_todos():
         if gdfs:
             gdf_sensor = pd.concat(gdfs, ignore_index=True)
             gdf_sensor = gpd.GeoDataFrame(gdf_sensor, crs=CRS_SALIDA)
-            out_gpkg   = VECTOR_DIR / f"glaciar_echaurren_{sensor}.gpkg"
+            out_gpkg   = VECTOR_DIR / f"glaciar_{SLUG}_{sensor}.gpkg"
             gdf_sensor.to_file(out_gpkg, driver='GPKG')
             logging.info(f"  ✓ {out_gpkg.name} ({len(gdf_sensor)} polígonos)")
             gdfs_por_sensor[sensor] = gdf_sensor
@@ -244,7 +289,7 @@ def vectorizar_todos():
     if gdfs_por_sensor:
         gdf_all = pd.concat(gdfs_por_sensor.values(), ignore_index=True)
         gdf_all = gpd.GeoDataFrame(gdf_all, crs=CRS_SALIDA)
-        out_all = VECTOR_DIR / "glaciar_echaurren_todos.gpkg"
+        out_all = VECTOR_DIR / f"glaciar_{SLUG}_todos.gpkg"
         gdf_all.to_file(out_all, driver='GPKG')
         logging.info(f"  ✓ {out_all.name} ({len(gdf_all)} polígonos totales)")
         return gdfs_por_sensor
@@ -671,6 +716,9 @@ def guardar_resultados(series_dict, decadas_dict):
 # ============================================================================
 
 def main():
+    slug = parse_glacier_arg()
+    configurar_glaciar(slug)
+
     logging.info("===== ETAPA 3A: CLASIFICACIÓN =====")
     for sensor, dir_ndsi in NDSI_DIRS.items():
         clasificar_carpeta(sensor, dir_ndsi)

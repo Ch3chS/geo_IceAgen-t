@@ -8,6 +8,11 @@ __pycache__/
 # Caché de pytest
 .pytest_cache/
 
+# Datos crudos pesados por glaciar (rasters Landsat/Sentinel-2/FABDEM)
+/data/raw/*/sentinel2
+/data/raw/*/landsat
+/data/raw/*/fabdem
+# Legacy (estructura plana anterior)
 /data/raw/fabdem
 /data/raw/sentinel2
 /data/raw/landsat

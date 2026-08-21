@@ -8,6 +8,7 @@ Selecciona la mejor escena por año cuando hay múltiples descargadas.
 
 import logging
 import re
+import sys
 from pathlib import Path
 import numpy as np
 import rasterio
@@ -23,20 +24,55 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # ============================================================================
 BASE_DIR = Path(__file__).resolve().parents[1]
 
-RAW_SENTINEL_DIR  = BASE_DIR / "data" / "raw" / "sentinel2"
-RAW_LANDSAT_DIR   = BASE_DIR / "data" / "raw" / "landsat"
-PROC_SENTINEL_DIR = BASE_DIR / "data" / "processed" / "sentinel2"
-PROC_LANDSAT_DIR  = BASE_DIR / "data" / "processed" / "landsat"
+sys.path.insert(0, str(BASE_DIR))
+from scripts.glacier_config import get_config, parse_glacier_arg  # noqa: E402
+
+RAW_SENTINEL_DIR  = BASE_DIR / "data" / "raw" / "echaurren" / "sentinel2"
+RAW_LANDSAT_DIR   = BASE_DIR / "data" / "raw" / "echaurren" / "landsat"
+PROC_SENTINEL_DIR = BASE_DIR / "data" / "processed" / "echaurren" / "sentinel2"
+PROC_LANDSAT_DIR  = BASE_DIR / "data" / "processed" / "echaurren" / "landsat"
 
 for d in [PROC_SENTINEL_DIR, PROC_LANDSAT_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
-# Área del glaciar Echaurren en UTM 19S (EPSG:32719)
-AOI_BOUNDS  = (393150, 6282300, 396200, 6285350)  # (minx, miny, maxx, maxy)
-AOI_CRS     = 'EPSG:32719'
+# Área del glaciar Echaurren en UTM 19S (EPSG:32719) — default (echaurren)
+AOI_BOUNDS   = (393150, 6282300, 396200, 6285350)  # (minx, miny, maxx, maxy)
+AOI_CRS      = 'EPSG:32719'
 AOI_CRS_EPSG = 32719  # entero para comparaciones robustas
+RESOLUCION_M = 30
+PREFIJO_SALIDA = "echaurren"   # prefijo de archivos de salida (slug del glaciar)
 
 UMBRAL_NDSI_CALIDAD = 0.4   # umbral usado también en la evaluación rápida de calidad
+
+
+def configurar_glaciar(slug):
+    """
+    Ajusta rutas, AOI, CRS y prefijo de salida al glaciar `slug`.
+    Por defecto (import) se configura echaurren para mantener el
+    comportamiento original.
+    """
+    global RAW_SENTINEL_DIR, RAW_LANDSAT_DIR
+    global PROC_SENTINEL_DIR, PROC_LANDSAT_DIR
+    global AOI_BOUNDS, AOI_CRS, AOI_CRS_EPSG
+    global RESOLUCION_M, PREFIJO_SALIDA
+
+    cfg = get_config(slug)
+
+    RAW_SENTINEL_DIR  = BASE_DIR / "data" / "raw" / cfg.slug / "sentinel2"
+    RAW_LANDSAT_DIR   = BASE_DIR / "data" / "raw" / cfg.slug / "landsat"
+    PROC_SENTINEL_DIR = BASE_DIR / "data" / "processed" / cfg.slug / "sentinel2"
+    PROC_LANDSAT_DIR  = BASE_DIR / "data" / "processed" / cfg.slug / "landsat"
+
+    for d in [PROC_SENTINEL_DIR, PROC_LANDSAT_DIR]:
+        d.mkdir(parents=True, exist_ok=True)
+
+    AOI_BOUNDS   = cfg.aoi_bounds_utm
+    AOI_CRS      = f'EPSG:{cfg.crs_epsg}'
+    AOI_CRS_EPSG = cfg.crs_epsg
+    RESOLUCION_M = cfg.resolucion_m
+    PREFIJO_SALIDA = cfg.slug
+
+    logging.info(f"Glaciar configurado: {cfg.nombre} (slug={cfg.slug})")
 
 # ============================================================================
 # FUNCIONES COMUNES
@@ -50,24 +86,26 @@ def _epsg_de_crs(crs) -> int:
         return -1
 
 
-def recortar_y_remuestrear_banda(ruta_tif, bounds_utm, target_shape=None):
+def recortar_y_remuestrear_banda(ruta_tif, bounds_utm, target_shape=None,
+                                 crs_destino=None, resolucion_m=None):
     """
-    Lee una banda, recorta y REPROYECTA forzosamente al AOI estricto (EPSG:32719).
+    Lee una banda, recorta y REPROYECTA forzosamente al AOI estricto.
     Asegura que todas las matrices (Sentinel o Landsat) compartan exactamente 
     el mismo extent geográfico y alineación de píxeles.
+    Por defecto usa el CRS y la resolución del glaciar configurado.
     """
+    crs_destino = crs_destino or AOI_CRS
+    resolucion_m = resolucion_m or RESOLUCION_M
     with rasterio.open(ruta_tif) as src:
-        # Calcular los límites del AOI en el CRS de destino (EPSG:32719)
+        # Calcular los límites del AOI en el CRS de destino
         minx, miny, maxx, maxy = bounds_utm
-        crs_destino = 'EPSG:32719'
         
         # 1. Definir dimensiones de salida.
         if target_shape:
             out_rows, out_cols = target_shape[0], target_shape[1]
         else:
-            # Resolucion por defecto (30m x 30m)
-            out_cols = int((maxx - minx) / 30)
-            out_rows = int((maxy - miny) / 30)
+            out_cols = int((maxx - minx) / resolucion_m)
+            out_rows = int((maxy - miny) / resolucion_m)
             
         # 2. Crear la matriz de transformación exacta y rígida anclada a UTM 19S
         # (CORRECCIÓN: Se usa transform_from_bounds en lugar de from_bounds)
@@ -277,7 +315,7 @@ def procesar_sentinel2():
             bandas['B11'], AOI_BOUNDS, target_shape=verde.shape
         )
         ndsi    = calcular_ndsi(verde, swir)
-        out_name = f"echaurren_ndsi_{mejor_info['fecha']}.tif"
+        out_name = f"{PREFIJO_SALIDA}_ndsi_{mejor_info['fecha']}.tif"
         guardar_ndsi(ndsi, transform, crs, PROC_SENTINEL_DIR / out_name)
 
 
@@ -364,7 +402,7 @@ def procesar_landsat():
             bandas['swir16'], AOI_BOUNDS, target_shape=verde.shape
         )
         ndsi     = calcular_ndsi(verde, swir)
-        out_name = f"landsat_ndsi_{mejor_info['fecha']}.tif"
+        out_name = f"{PREFIJO_SALIDA}_ndsi_{mejor_info['fecha']}.tif"
         guardar_ndsi(ndsi, transform, crs, PROC_LANDSAT_DIR / out_name)
 
 
@@ -373,6 +411,8 @@ def procesar_landsat():
 # ============================================================================
 def main():
     logging.info("===== INICIANDO PROCESAMIENTO COMPLETO =====")
+    slug = parse_glacier_arg()
+    configurar_glaciar(slug)
     procesar_sentinel2()
     procesar_landsat()
     logging.info("===== PROCESAMIENTO FINALIZADO =====")
