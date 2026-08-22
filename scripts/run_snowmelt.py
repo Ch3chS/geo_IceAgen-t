@@ -44,8 +44,10 @@ for _var in ("PROJ_LIB", "PROJ_DATA"):
 BASE_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE_DIR))
 
+from scripts import spatial_analysis as sa  # noqa: E402
+from scripts.glacier_config import get_config, parse_glacier_arg  # noqa: E402
 from scripts.spatial_analysis import (  # noqa: E402
-    DGA_ESTACIONES, DGA_MENSUAL_PATH, _residuos_detrended,
+    DGA_MENSUAL_PATH, _residuos_detrended,
     caudal_estival_djf, leer_caudal_dga,
 )
 from scipy import stats  # noqa: E402
@@ -57,20 +59,22 @@ from scipy import stats  # noqa: E402
 # para que el DEM de entrada quede alineado con la extensión clasificada del
 # glaciar (ver limitación de escala en las notas del dashboard: este DEM cubre
 # el glaciar, no toda la cuenca del Yeso).
+# Default: Echaurren (mismo comportamiento original).
 AOI_BOUNDS = (393150, 6282300, 396200, 6285350)  # (minx, miny, maxx, maxy)
 AOI_CRS = "EPSG:32719"
 RESOLUCION_M = 30
+SLUG = "echaurren"
 
-FABDEM_PATH = BASE_DIR / "data" / "raw" / "fabdem" / "fabdem_dem.tif"
+FABDEM_PATH = BASE_DIR / "data" / "raw" / "echaurren" / "fabdem" / "fabdem_dem.tif"
 
-SNOWMELT_DIR = BASE_DIR / "data" / "processed" / "snowmelt"
+SNOWMELT_DIR = BASE_DIR / "data" / "processed" / "echaurren" / "snowmelt"
 DEM_ASC_PATH = SNOWMELT_DIR / "echaurren_dem.asc"
 OUT_DIR = SNOWMELT_DIR / "out"
 
 ERA5_DIR = BASE_DIR / "data" / "raw" / "era5"
-FORZANTE_PATH = ERA5_DIR / "forzante_diario.csv"
+FORZANTE_PATH = ERA5_DIR / "forzante_diario_echaurren.csv"
 
-OUTPUTS_DIR = BASE_DIR / "outputs"
+OUTPUTS_DIR = BASE_DIR / "outputs" / "echaurren"
 
 SNOWMELT_BIN_CANDIDATES = [
     BASE_DIR / "snowmelt-rs" / "target" / "release" / "snowmelt.exe",
@@ -89,6 +93,40 @@ MIN_DIAS_ESTIVOS = 60  # cobertura mínima de la ventana DJF (~90 días)
 
 for d in [SNOWMELT_DIR, OUT_DIR, ERA5_DIR, OUTPUTS_DIR]:
     d.mkdir(parents=True, exist_ok=True)
+
+
+def configurar_glaciar(slug):
+    """
+    Ajusta AOI, DEM, forzante ERA5 y rutas de salida al glaciar `slug`.
+    Reutiliza spatial_analysis.configurar_glaciar para tener OUT_DIR,
+    DGA_ESTACIONES y DEM_PATH del glaciar. Por defecto (import) se configura
+    echaurren para mantener el comportamiento original.
+    """
+    global AOI_BOUNDS, AOI_CRS, RESOLUCION_M, SLUG
+    global FABDEM_PATH, SNOWMELT_DIR, DEM_ASC_PATH, OUT_DIR, FORZANTE_PATH
+    global OUTPUTS_DIR
+
+    cfg = get_config(slug)
+    sa.configurar_glaciar(slug)  # OUT_DIR, DGA_ESTACIONES, DEM_PATH de sa
+
+    AOI_BOUNDS = cfg.aoi_bounds_utm
+    AOI_CRS = f"EPSG:{cfg.crs_epsg}"
+    RESOLUCION_M = cfg.resolucion_m
+    SLUG = cfg.slug
+
+    FABDEM_PATH = BASE_DIR / "data" / "raw" / cfg.slug / "fabdem" / "fabdem_dem.tif"
+    SNOWMELT_DIR = BASE_DIR / "data" / "processed" / cfg.slug / "snowmelt"
+    DEM_ASC_PATH = SNOWMELT_DIR / f"{cfg.slug}_dem.asc"
+    OUT_DIR = SNOWMELT_DIR / "out"
+
+    FORZANTE_PATH = ERA5_DIR / f"forzante_diario_{cfg.slug}.csv"
+
+    OUTPUTS_DIR = BASE_DIR / "outputs" / cfg.slug
+
+    for d in [SNOWMELT_DIR, OUT_DIR, ERA5_DIR, OUTPUTS_DIR]:
+        d.mkdir(parents=True, exist_ok=True)
+
+    logging.info(f"Glaciar configurado: {cfg.nombre} (slug={cfg.slug})")
 
 
 # ============================================================================
@@ -341,7 +379,7 @@ def correlacion_snowmelt_dga(djf):
                  if c.endswith("_djf_mm") and c != "snow_cover_fraction_djf_mm"]
 
     rows_caudal, rows_corr = [], []
-    for codigo, nombre in DGA_ESTACIONES.items():
+    for codigo, nombre in sa.DGA_ESTACIONES.items():
         df_caudal = leer_caudal_dga(DGA_MENSUAL_PATH, codigo)
         caud = [(año, caudal_estival_djf(df_caudal, int(año))) for año in djf["año"]]
         df_caud = pd.DataFrame(caud, columns=["año", "caudal_djf_m3s"])
@@ -400,6 +438,9 @@ def guardar_resumen(stdout_texto, z_ref, lat, lon):
 # ============================================================================
 
 def main():
+    slug = parse_glacier_arg()
+    configurar_glaciar(slug)
+
     logging.info("===== ETAPA 5b: BALANCE FÍSICO (snowmelt-rs) =====")
 
     logging.info("--- Preparando DEM ---")

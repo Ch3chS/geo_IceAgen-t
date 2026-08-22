@@ -3,11 +3,12 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from pathlib import Path
+import sys
 
-ESTACIONES = {
-    "05703006": "Estero Glaciar Echaurren Norte",
-    "05704002": "Río Maipo en San Alfonso",
-}
+BASE_DIR_APP = Path(__file__).resolve().parents[2]
+if str(BASE_DIR_APP) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR_APP))
+from scripts.glacier_config import get_config  # noqa: E402
 
 VARIABLES_SIM = {
     "melt_djf_mm":         "Derretimiento simulado (mm w.e., suma DJF)",
@@ -82,7 +83,9 @@ def _fig_serie(joined, var):
     return fig
 
 
-def run_snowmelt():
+def run_snowmelt(glaciar=None):
+    glaciar = glaciar or get_config("echaurren")
+    estaciones = glaciar.dga_estaciones
     st.markdown("""
         <style>
             .reportview-container .main .block-container {
@@ -93,13 +96,14 @@ def run_snowmelt():
 
     st.subheader("Balance físico de derretimiento (snowmelt-rs)")
     st.caption(
-        "Etapa 5b | Segunda línea de evidencia independiente: simula el balance "
+        f"Etapa 5b | {glaciar.nombre} | "
+        "Segunda línea de evidencia independiente: simula el balance "
         "de masa nival/glaciar sobre el DEM con un modelo físico (snowmelt-rs) "
         "y compara el aporte de deshielo con el caudal estival (DJF) de la DGA."
     )
 
     BASE_DIR = Path(__file__).resolve().parents[2]
-    OUT_DIR  = BASE_DIR / "outputs"
+    OUT_DIR  = BASE_DIR / "outputs" / glaciar.slug
 
     DJF     = OUT_DIR / "snowmelt_djf.csv"
     CAUDAL  = OUT_DIR / "caudal_dga_djf_snowmelt.csv"
@@ -151,8 +155,8 @@ def run_snowmelt():
     col_a, col_b = st.columns(2)
     with col_a:
         estacion = st.selectbox(
-            "Estación DGA", list(ESTACIONES.keys()),
-            format_func=lambda c: f"{c} — {ESTACIONES[c]}",
+            "Estación DGA", list(estaciones.keys()),
+            format_func=lambda c: f"{c} — {estaciones[c]}",
             key="snowmelt_estacion"
         )
     with col_b:

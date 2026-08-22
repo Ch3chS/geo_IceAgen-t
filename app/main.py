@@ -98,7 +98,7 @@ elif opcion == "Correlación DGA":
 
 elif opcion == "Balance físico (snowmelt-rs)":
     from pages_.snowmelt import run_snowmelt
-    run_snowmelt()
+    run_snowmelt(glaciar)
 
 else:
     st.info("Próximamente: nuevos dashboards para análisis glaciar.")
