@@ -10,9 +10,20 @@ ESTACIONES = {
 }
 
 VARIABLES_SIM = {
-    "melt_djf_mm":   "Derretimiento simulado (mm w.e., suma DJF)",
-    "runoff_djf_mm": "Escorrentía simulada (mm w.e., suma DJF)",
-    "routed_djf_mm": "Escorrentía ruteada (mm w.e., suma DJF)",
+    "melt_djf_mm":         "Derretimiento simulado (mm w.e., suma DJF)",
+    "runoff_djf_mm":       "Escorrentía simulada (mm w.e., suma DJF)",
+    "routed_djf_mm":       "Escorrentía ruteada (mm w.e., suma DJF)",
+}
+
+# Variables adicionales que snowmelt-rs también correlaciona (ver
+# correlacion_snowmelt_dga.csv) pero que no son la escorrentía/derretimiento
+# principal — se muestran en la tabla de resultados aunque no estén en el
+# selector de gráficos.
+VARIABLES_TABLA = {
+    **VARIABLES_SIM,
+    "snowfall_djf_mm":     "Nevada simulada (mm, suma DJF)",
+    "rain_djf_mm":         "Lluvia simulada (mm, suma DJF)",
+    "sublimation_djf_mm":  "Sublimación simulada (mm, suma DJF)",
 }
 
 
@@ -120,10 +131,16 @@ def run_snowmelt():
     # ── Resumen del modelo físico ───────────────────────────────────────────
     st.markdown("#### Resumen del balance de masa simulado")
     c1, c2, c3 = st.columns(3)
-    c1.metric("ELA estimada", f"{resumen['ela_m']:.0f} m"
-               if pd.notna(resumen['ela_m']) else "sin cruce de balance")
+    c1.metric("ELA estimada",
+               f"{resumen['ela_m']:.0f} m" if pd.notna(resumen['ela_m']) else "N/D")
     c2.metric("Balance de masa medio", f"{resumen['balance_medio_mm_we']:.0f} mm w.e.")
     c3.metric("SWE medio final", f"{resumen['swe_medio_final_mm']:.0f} mm")
+    if pd.isna(resumen['ela_m']):
+        st.caption(
+            "ELA sin cruce de balance: todo el dominio (DEM del glaciar) gana o "
+            "pierde masa de forma homogénea en el periodo simulado, sin una "
+            "banda de elevación donde el balance cambie de signo."
+        )
     st.caption(
         f"Parámetros: z_ref={resumen['z_ref_m']:.0f} m (elevación ERA5 del punto de "
         f"forzante) · lapse rate={resumen['lapse_rate']} °C/m · "
@@ -186,7 +203,7 @@ def run_snowmelt():
         "r": "r", "p_valor": "p", "r_detrended": "r detrended", "p_detrended": "p detrended",
     }
     tabla = corr[corr["codigo_estacion"] == estacion][list(col_map)].copy()
-    tabla["variable"] = tabla["variable"].map(VARIABLES_SIM)
+    tabla["variable"] = tabla["variable"].map(VARIABLES_TABLA)
     for col in ["p_valor", "p_detrended"]:
         tabla[col] = tabla[col].apply(fmt_p)
     st.dataframe(tabla.rename(columns=col_map), use_container_width=True, hide_index=True)
