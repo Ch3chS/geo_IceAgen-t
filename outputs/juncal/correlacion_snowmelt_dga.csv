@@ -1,0 +1,13 @@
+codigo_estacion,nombre_estacion,variable,n,año_inicio,año_fin,r,p_valor,r_detrended,p_detrended,subperiodo
+05403002,Río Aconcagua en Río Blanco,snowfall_djf_mm,39,1986,2026,-0.2399,0.14121278720091637,0.0422,0.7984746136282252,completo
+05403002,Río Aconcagua en Río Blanco,rain_djf_mm,39,1986,2026,-0.3376,0.035593092888554986,-0.0825,0.6175753740246838,completo
+05403002,Río Aconcagua en Río Blanco,melt_djf_mm,39,1986,2026,0.7739,7.553144201042475e-09,0.7666,1.269377928513841e-08,completo
+05403002,Río Aconcagua en Río Blanco,sublimation_djf_mm,39,1986,2026,0.7744,7.285157156008735e-09,0.781,4.474481012702297e-09,completo
+05403002,Río Aconcagua en Río Blanco,runoff_djf_mm,39,1986,2026,0.7577,2.3400896487044496e-08,0.764,1.5228674222911013e-08,completo
+05403002,Río Aconcagua en Río Blanco,routed_djf_mm,39,1986,2026,0.7601,1.988387991469764e-08,0.7645,1.474160541196962e-08,completo
+05410002,Río Aconcagua en Chacabuquito,snowfall_djf_mm,41,1986,2026,-0.243,0.12585621214049217,-0.1223,0.4460542051228866,completo
+05410002,Río Aconcagua en Chacabuquito,rain_djf_mm,41,1986,2026,-0.3264,0.037253542094070904,-0.2021,0.20517800415965032,completo
+05410002,Río Aconcagua en Chacabuquito,melt_djf_mm,41,1986,2026,0.9094,1.9099230534534117e-16,0.9105,1.5366784133053223e-16,completo
+05410002,Río Aconcagua en Chacabuquito,sublimation_djf_mm,41,1986,2026,0.9194,2.1424930691799784e-17,0.9235,8.11050097789729e-18,completo
+05410002,Río Aconcagua en Chacabuquito,runoff_djf_mm,41,1986,2026,0.8935,3.872594472057503e-15,0.899,1.464456522500775e-15,completo
+05410002,Río Aconcagua en Chacabuquito,routed_djf_mm,41,1986,2026,0.8984,1.633997943030556e-15,0.9026,7.349451713219136e-16,completo

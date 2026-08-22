@@ -28,7 +28,7 @@ import pandas as pd
 import rasterio
 import requests
 from rasterio.enums import Resampling
-from rasterio.transform import from_bounds as transform_from_bounds
+from rasterio.transform import from_origin
 from rasterio.warp import reproject, transform as warp_transform
 
 logging.basicConfig(level=logging.INFO,
@@ -233,9 +233,14 @@ def preparar_dem_asc():
         )
 
     minx, miny, maxx, maxy = AOI_BOUNDS
-    out_cols = int((maxx - minx) / RESOLUCION_M)
-    out_rows = int((maxy - miny) / RESOLUCION_M)
-    transform_salida = transform_from_bounds(minx, miny, maxx, maxy, out_cols, out_rows)
+    out_cols = int(round((maxx - minx) / RESOLUCION_M))
+    out_rows = int(round((maxy - miny) / RESOLUCION_M))
+    # Grid de celdas CUADRADAS exactas anclado al vértice superior-izquierdo.
+    # Con transform_from_bounds las celdas quedan no cuadradas (la extensión se
+    # reparte sobre el redondeo) y el driver AAIGrid escribe DX/DY en vez de
+    # CELLSIZE, que snowmelt-rs no puede leer. from_origin fuerza celdas de
+    # exactamente RESOLUCION_M x RESOLUCION_M -> AAIGrid escribe CELLSIZE.
+    transform_salida = from_origin(minx, maxy, RESOLUCION_M, RESOLUCION_M)
 
     dem = np.full((out_rows, out_cols), np.nan, dtype=np.float32)
     with rasterio.open(FABDEM_PATH) as src:
