@@ -1,0 +1,3 @@
+sensor,n_años,mae_km2,sesgo_medio_km2,rmse_km2,año_dga_referencia,area_dga_referencia_km2,año_mas_cercano,diff_año_mas_cercano_km2
+landsat,40,8.84532,7.90446,10.06405,2022,8.035181,2022,0.98905
+sentinel2,9,12.73058,12.73058,14.00102,2022,8.035181,2022,4.71276
