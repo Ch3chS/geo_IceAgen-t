@@ -18,20 +18,39 @@ $PYTHON_CMD -m venv .env
 source ./.env/bin/activate
 pip install -r requirements.txt
 
-# Descarga y procesamiento de datos
-python scripts/download_data.py
-python scripts/process_data.py
-python scripts/spatial_analysis.py
-python scripts/validar_dga.py
+# Descarga y procesamiento de datos por glaciar.
+# Los glaciares se leen de scripts/glacier_config.py (fuente única de verdad);
+# si la consulta falla, se usa la lista por defecto.
+GLACIARES=$($PYTHON_CMD -c "from scripts.glacier_config import GLACIER_CONFIGS; print(' '.join(GLACIER_CONFIGS))" 2>/dev/null)
+if [ -z "$GLACIARES" ]; then
+    GLACIARES="echaurren juncal"
+    echo "Aviso: no se pudo leer la config de glaciares; usando: $GLACIARES"
+fi
+echo "Glaciares a procesar: $GLACIARES"
+
+for G in $GLACIARES; do
+    echo ""
+    echo "===== PROCESANDO GLACIAR: $G ====="
+    python scripts/download_data.py    --glacier "$G"
+    python scripts/process_data.py     --glacier "$G"
+    python scripts/spatial_analysis.py --glacier "$G"
+    python scripts/validar_dga.py      --glacier "$G"
+done
 
 # Etapa 5b (opcional) — balance físico con snowmelt-rs. Requiere Rust/cargo;
 # si no está disponible o falla, no interrumpe el resto del pipeline (el
 # dashboard ya maneja la ausencia de sus archivos de salida).
 if command -v cargo &> /dev/null && [ -d snowmelt-rs ]; then
     echo "Compilando snowmelt-cli..."
-    (cd snowmelt-rs && cargo build --release -p snowmelt-cli) \
-        && python scripts/run_snowmelt.py \
-        || echo "Aviso: snowmelt-rs falló, se omite la Etapa 5b."
+    if (cd snowmelt-rs && cargo build --release -p snowmelt-cli); then
+        for G in $GLACIARES; do
+            echo "--- snowmelt: $G ---"
+            python scripts/run_snowmelt.py --glacier "$G" \
+                || echo "Aviso: snowmelt falló para $G, se omite la Etapa 5b."
+        done
+    else
+        echo "Aviso: la compilación de snowmelt-rs falló, se omite la Etapa 5b."
+    fi
 else
     echo "Aviso: cargo no disponible, se omite la Etapa 5b (snowmelt-rs)."
 fi

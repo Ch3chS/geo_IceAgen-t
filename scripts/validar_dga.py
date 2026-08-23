@@ -7,10 +7,14 @@ fotointerpretado (INVE_FECHA=2022), no una serie temporal. Esta etapa mide
 qué tan lejos está el área glaciar del pipeline (NDSI+DEM) de esa referencia,
 año por año y por sensor, para cuantificar el sesgo sistemático de cada uno
 (complementa, no reemplaza, la correlación con caudal DGA de spatial_analysis.py).
+
+Soporta múltiples glaciares: se selecciona el glaciar con `--glacier <slug>`
+(por defecto echaurren) y las salidas se escriben en `outputs/{slug}/`.
 """
 
 import logging
 import os
+import sys
 from pathlib import Path
 
 import geopandas as gpd
@@ -26,37 +30,59 @@ for _var in ("PROJ_LIB", "PROJ_DATA"):
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 
+sys.path.insert(0, str(BASE_DIR))
+from scripts.glacier_config import get_config, parse_glacier_arg  # noqa: E402
+
 DGA_VECTOR_PATH = BASE_DIR / "data" / "IPG_2022_v2" / "INV_PG_2022_v2.shp"
-OUT_DIR = BASE_DIR / "outputs"
+OUT_DIR = BASE_DIR / "outputs" / "echaurren"
 
 CRS_SALIDA = "EPSG:32719"
+CRS_SALIDA_EPSG = 32719
+NOMBRE_DGA = "Echaurren Norte"
 AÑO_REFERENCIA_DGA = 2022
 
 SENSORES = ["landsat", "sentinel2"]
+
+
+def configurar_glaciar(slug):
+    """Ajusta rutas, CRS y filtro del inventario al glaciar `slug`."""
+    global OUT_DIR, CRS_SALIDA, CRS_SALIDA_EPSG, NOMBRE_DGA
+
+    cfg = get_config(slug)
+    OUT_DIR = BASE_DIR / "outputs" / cfg.slug
+    CRS_SALIDA = f"EPSG:{cfg.crs_epsg}"
+    CRS_SALIDA_EPSG = cfg.crs_epsg
+    NOMBRE_DGA = cfg.nombre_dga
+    logging.info(f"Glaciar configurado: {cfg.nombre} (slug={cfg.slug})")
 
 
 # ============================================================================
 # CARGA DE LA REFERENCIA DGA (I/O)
 # ============================================================================
 
-def cargar_referencia_dga():
+def cargar_referencia_dga(nombre_dga=None, crs_epsg=None):
     """
-    Filtra el Inventario DGA por 'Echaurren Norte' (matchea 3 sub-features:
-    ECHAURREN NORTE, NORTE A, NORTE B — todas clasificadas GLACIARETE) y
-    reproyecta a EPSG:32719.
+    Filtra el Inventario DGA por el `NOMBRE` del glaciar
+    (p. ej. 'Echaurren Norte' matchea ECHAURREN NORTE + fragmentos A/B;
+    'JUNCAL NORTE' matchea las sub-features A-D — varias clasificadas
+    GLACIARETE) y reproyecta al CRS de trabajo.
 
     El pipeline NDSI+DEM no distingue fragmentos del mismo cuerpo de hielo,
-    así que el área de referencia es la SUMA de las 3 sub-features, no solo
+    así que el área de referencia es la SUMA de las sub-features, no solo
     el cuerpo principal.
     """
+    nombre_dga = nombre_dga or NOMBRE_DGA
+    crs = (f"EPSG:{crs_epsg}" if isinstance(crs_epsg, int)
+           else (crs_epsg or CRS_SALIDA))
     gdf = gpd.read_file(DGA_VECTOR_PATH)
-    sub = gdf[gdf['NOMBRE'].str.contains('Echaurren Norte', case=False, na=False)].copy()
+    sub = gdf[gdf['NOMBRE'].str.contains(nombre_dga, case=False, na=False)].copy()
     if sub.empty:
-        raise ValueError("No se encontraron features 'Echaurren Norte' en el Inventario DGA")
-    sub = sub.to_crs(CRS_SALIDA)
+        raise ValueError(
+            f"No se encontraron features '{nombre_dga}' en el Inventario DGA")
+    sub = sub.to_crs(crs)
     area_total_km2 = float(sub.geometry.area.sum() / 1e6)
     logging.info(
-        f"  Referencia DGA: {len(sub)} sub-features, "
+        f"  Referencia DGA ({nombre_dga}): {len(sub)} sub-features, "
         f"área total={area_total_km2:.6f} km² (año {AÑO_REFERENCIA_DGA})"
     )
     return sub, area_total_km2
@@ -122,6 +148,9 @@ def resumen_por_sensor(tabla_discrepancias: pd.DataFrame,
 # ============================================================================
 
 def main():
+    slug = parse_glacier_arg()
+    configurar_glaciar(slug)
+
     logging.info("===== ETAPA 6: VALIDACIÓN ESPACIAL CONTRA INVENTARIO DGA =====")
 
     _, area_dga_km2 = cargar_referencia_dga()

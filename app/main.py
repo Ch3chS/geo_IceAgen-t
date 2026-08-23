@@ -106,7 +106,7 @@ elif opcion == "Balance físico (snowmelt-rs)":
 
 elif opcion == "Validación DGA":
     from pages_.validacion_dga import run_validacion_dga
-    run_validacion_dga()
+    run_validacion_dga(glaciar)
 
 else:
     st.info("Próximamente: nuevos dashboards para análisis glaciar.")

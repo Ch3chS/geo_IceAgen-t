@@ -11,6 +11,7 @@ import sys
 BASE_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(BASE_DIR))
 
+from scripts.glacier_config import get_config  # noqa: E402
 from scripts.validar_dga import cargar_referencia_dga  # noqa: E402
 
 SENSORES = {"landsat": "Landsat", "sentinel2": "Sentinel-2"}
@@ -34,7 +35,8 @@ def _fig_diff(df_sensor, sensor):
     return fig
 
 
-def run_validacion_dga():
+def run_validacion_dga(glaciar=None):
+    glaciar = glaciar or get_config("echaurren")
     st.markdown("""
         <style>
             .reportview-container .main .block-container {
@@ -45,13 +47,14 @@ def run_validacion_dga():
 
     st.subheader("Validación espacial contra el Inventario DGA (IPG 2022)")
     st.caption(
-        "Etapa 6 | Compara el área glaciar del pipeline (NDSI+DEM) contra el "
+        f"Etapa 6 | {glaciar.nombre} | "
+        "Compara el área glaciar del pipeline (NDSI+DEM) contra el "
         "único snapshot fotointerpretado del Inventario Público de Glaciares "
         "(IPG 2022) — MAE, sesgo sistemático por sensor y mapa comparativo de "
         "polígonos."
     )
 
-    OUT_DIR = BASE_DIR / "outputs"
+    OUT_DIR = BASE_DIR / "outputs" / glaciar.slug
     AREA = OUT_DIR / "validacion_dga_area.csv"
     RESUMEN = OUT_DIR / "validacion_dga_resumen.csv"
 
@@ -87,7 +90,7 @@ def run_validacion_dga():
                 f"(Δ={fila['diff_año_mas_cercano_km2']:+.4f} km²)"
             )
     st.caption(
-        f"Referencia DGA (Echaurren Norte + fragmentos A/B, año "
+        f"Referencia DGA ({glaciar.nombre_dga} + fragmentos, año "
         f"{int(resumen['año_dga_referencia'].iloc[0])}): "
         f"{resumen['area_dga_referencia_km2'].iloc[0]:.6f} km²."
     )
@@ -106,30 +109,31 @@ def run_validacion_dga():
     # ── Mapa comparativo ─────────────────────────────────────────────────────
     st.markdown("#### Mapa comparativo: DGA vs pipeline")
 
-    VECTOR_DIR = BASE_DIR / "data" / "processed" / "vectores"
+    VECTOR_DIR = BASE_DIR / "data" / "processed" / glaciar.slug / "vectores"
     gpkg_disp = {
-        s: VECTOR_DIR / f"glaciar_echaurren_{s}.gpkg"
-        for s in SENSORES if (VECTOR_DIR / f"glaciar_echaurren_{s}.gpkg").exists()
+        s: VECTOR_DIR / f"glaciar_{glaciar.slug}_{s}.gpkg"
+        for s in SENSORES
+        if (VECTOR_DIR / f"glaciar_{glaciar.slug}_{s}.gpkg").exists()
     }
 
     if not gpkg_disp:
         st.warning(
             "No se encontraron GeoPackages vectorizados en "
-            "`data/processed/vectores/` — ejecuta `scripts/spatial_analysis.py` "
+            f"`{VECTOR_DIR}` — ejecuta `scripts/spatial_analysis.py` "
             "para generar el mapa comparativo."
         )
         return
 
     @st.cache_data
-    def cargar_dga_ref():
-        gdf, area_km2 = cargar_referencia_dga()
+    def cargar_dga_ref(nombre_dga, crs_epsg):
+        gdf, area_km2 = cargar_referencia_dga(nombre_dga, crs_epsg)
         return gdf, area_km2
 
     @st.cache_data
     def cargar_gpkg(path_str):
         return gpd.read_file(path_str)
 
-    dga_gdf, _ = cargar_dga_ref()
+    dga_gdf, _ = cargar_dga_ref(glaciar.nombre_dga, glaciar.crs_epsg)
 
     col_ctrl, col_map = st.columns([1, 3])
     with col_ctrl:
@@ -219,21 +223,20 @@ def run_validacion_dga():
 
     # ── Notas y limitaciones ─────────────────────────────────────────────────
     st.markdown("#### Notas y limitaciones")
-    st.markdown("""
+    st.markdown(f"""
     - **El DGA es un único snapshot** (fotointerpretación, año 2022), no una
       serie temporal — esta validación mide qué tan lejos está *cada año* del
       pipeline de esa única referencia fija, no una comparación año-a-año real.
-    - **Referencia DGA = suma de 3 sub-features** (ECHAURREN NORTE + fragmentos
-      A y B, todos clasificados `GLACIARETE`, la categoría morfológica más
-      pequeña/marginal del inventario): el pipeline no distingue fragmentos
-      del mismo cuerpo de hielo, así que sumarlos es la comparación más justa.
-    - **Sesgo dependiente del sensor**: Landsat (30 m) sobreestima
-      sistemáticamente mucho más que Sentinel-2 (10–20 m) — consistente con
-      píxeles mixtos de nieve estacional a 30 m clasificados como glaciar
-      (NDSI≥0.4 sobre 3 000 m s.n.m.), no solo hielo perenne. Sentinel-2 se
-      acerca bastante más a la referencia DGA en los años cercanos a 2022,
-      aunque también tiene años con sobreestimación fuerte (nevadas
-      atípicamente extendidas ese verano).
+    - **Referencia DGA = suma de las sub-features del inventario para
+      `{glaciar.nombre_dga}`** (algunas clasificadas `GLACIARETE`, la categoría
+      morfológica más pequeña/marginal del inventario): el pipeline no
+      distingue fragmentos del mismo cuerpo de hielo, así que sumarlos es la
+      comparación más justa.
+    - **Sesgo dependiente del sensor**: Landsat (30 m) suele sobreestimar
+      más que Sentinel-2 (10–20 m) — consistente con píxeles mixtos de nieve
+      estacional a 30 m clasificados como glaciar (NDSI≥0.4 sobre 3 000 m
+      s.n.m.), no solo hielo perenne. La magnitud exacta del sesgo se reporta
+      por sensor en las métricas de arriba.
     - **El área NDSI mide nieve+hielo del ~26 de enero, no glaciar perenne**:
       misma limitación ya documentada en la pestaña "Correlación DGA" — un
       año muy nevado infla el área NDSI sin que el glaciar realmente haya
