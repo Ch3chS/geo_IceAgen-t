@@ -22,6 +22,7 @@ pip install -r requirements.txt
 python scripts/download_data.py
 python scripts/process_data.py
 python scripts/spatial_analysis.py
+python scripts/validar_dga.py
 
 # Etapa 5b (opcional) — balance físico con snowmelt-rs. Requiere Rust/cargo;
 # si no está disponible o falla, no interrumpe el resto del pipeline (el
