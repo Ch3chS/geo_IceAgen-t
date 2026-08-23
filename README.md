@@ -11,18 +11,41 @@
 
 ## Descripción
 
-**geo_IceAgen't** cuantifica el retroceso de un glaciar andino de Chile central (Juncal, Olivares o Echaurren) en los últimos 40 años mediante imágenes Landsat, y estima su contribución al caudal estival de la cuenca receptora. El proyecto integra teledetección, SIG, hidrología y análisis multitemporal.
+**geo_IceAgen't** cuantifica el retroceso de glaciares andinos de Chile central en los últimos ~40 años mediante imágenes Landsat y Sentinel-2, y estima su contribución al caudal estival de la cuenca receptora. El proyecto integra teledetección, SIG, hidrología y análisis multitemporal.
+
+El proyecto es **multi-glaciar**: cada glaciar se define en una configuración (`scripts/glacier_config.py`) y el pipeline se ejecuta por glaciar con el flag `--glacier <slug>`. Actualmente están configurados:
+
+- **Echaurren Norte** (slug `echaurren`) — cuenca del Río Yeso/Maipo, estaciones DGA del Maipo.
+- **Juncal Norte** (slug `juncal`) — cuenca del Río Aconcagua, estaciones DGA de Aconcagua.
 
 Este repositorio corresponde al **Desafío 5** del curso *Geoinformática* (Universidad de Santiago de Chile, Semestre 1-2026). Su objetivo es generar evidencia cuantitativa sobre la pérdida de la reserva hídrica estratégica para Chile central.
 
 ## Características
 
-- Clasificación de cobertura glaciar vs. roca/suelo usando **NDSI** y band ratios.
-- Cálculo de área frontal por década y tasa de retroceso.
-- Correlación con datos de caudal de la DGA (HIDROlinea).
-- Estimación de la contribución glaciar al caudal estival.
-- Comparación con el Inventario Nacional de Glaciares (DGA).
-- Proyección simplificada de escenarios futuros.
+- **Soporte multi-glaciar por configuración**: cada glaciar define su AOI, CRS, estaciones DGA y umbrales; el dashboard permite elegir el glaciar.
+- **Clasificación de cobertura glaciar vs. roca/suelo** usando **NDSI** (≥ 0.4) + filtro altitudinal FABDEM (≥ 3 000 m s.n.m.).
+- **Cálculo de área por década y tasa de retroceso** (series temporales independientes por sensor, mediana robusta por quintiles y tendencia lineal).
+- **Correlación con caudal de la DGA** (Pearson crudo + detrended sobre el verano hidrológico DJF).
+- **Balance físico de masa** (Etapa 5b, `snowmelt-rs`): simula el derretimiento nival/glaciar sobre el DEM y lo correlaciona con el caudal DGA.
+- **Validación contra el Inventario Público de Glaciares** (Etapa 6): MAE, sesgo sistemático y RMSE del área del pipeline frente al snapshot IPG 2022, con mapa comparativo (IoU, omisión, comisión).
+
+## Pipeline
+
+```
+scripts/download_data.py:    descarga Sentinel-2/Landsat (Planetary Computer STAC),
+                             FABDEM y prepara las estaciones DGA
+scripts/process_data.py:     calcula NDSI, reproyecta todo al CRS/grid del glaciar
+scripts/spatial_analysis.py: clasificación NDSI+DEM → vectorización → series por década
+                             → correlación de Pearson con caudal DGA
+scripts/validar_dga.py:      Etapa 6 — validación espacial contra el Inventario DGA (IPG 2022)
+scripts/run_snowmelt.py:     Etapa 5b (opcional) — balance físico con el motor Rust snowmelt-rs
+```
+
+Todos los scripts aceptan `--glacier <slug>` (default: `echaurren`). Las salidas se organizan por glaciar:
+
+- Datos crudos: `data/raw/<slug>/...`
+- Datos procesados: `data/processed/<slug>/...`
+- Resultados (CSVs): `outputs/<slug>/...`
 
 ## Stack tecnológico
 
@@ -30,29 +53,32 @@ Este repositorio corresponde al **Desafío 5** del curso *Geoinformática* (Univ
 |-------------------|------------------------------------------|
 | Python 3.10+      | Lenguaje principal                       |
 | GeoPandas         | Manejo de datos vectoriales              |
-| Rasterio / Xarray | Procesamiento de imágenes satelitales    |
+| Rasterio           | Procesamiento de imágenes satelitales    |
 | Matplotlib        | Gráficos y mapas estáticos               |
 | Folium            | Mapas interactivos                       |
 | Contextily        | Mapas base en tiles                      |
-| Jupyter Notebook  | Desarrollo interactivo y documentado     |
-| Docker            | Para aislar el entorno                   |
+| Plotly / Streamlit| Dashboard interactivo                    |
+| Rust (snowmelt-rs)| Motor de balance de masa físico (Etapa 5b) |
+| Pytest            | Tests de las funciones puras             |
 
 ## Estructura del repositorio
 
 Los directorios se explican mejor en READMEs dentro de cada directorio. Pero en resumen:
 
-- `app/` Contiene la aplicación web para mostrar el dashboard.
-- `data/` Contiene los datos a utilizar, ya sea crudos, procesados o de fuentes externas.
-- `docker/` Cuenta con las imagenes y scripts de la dockerización.
-- `outputs/` Cuenta con los resultados del proyecto.
-- `scripts/` Cuenta con los scripts de apoyo para el proyecto.
+- `app/` Contiene la aplicación web (Streamlit) para mostrar el dashboard, con selector de glaciar.
+- `data/` Contiene los datos: crudos/procesados por glaciar, el Inventario IPG 2022 y el extracto DGA.
+- `docker/` Documentación de dockerización (PostGIS mencionado pero **no implementado**; `docker-compose.yml` está vacío).
+- `outputs/` Cuenta con los resultados por glaciar (`outputs/<slug>/`).
+- `scripts/` Cuenta con los scripts del pipeline.
+- `snowmelt-rs/` Submódulo Rust con el motor de balance de masa físico.
+- `tests/` Tests de las funciones puras de los scripts.
 
 Archivos en este directorio:
 - `.gitignore` Excluye los archivos pesados como rasteres etc.
-- `docker-compose.yml` Orquesta los contenedores.
+- `docker-compose.yml` Orquesta los contenedores (vacío — no usado).
 - `README.md` Describe el proyecto (es este archivo).
 - `requirements.txt` Dependencias para ejecutar el proyecto.
-- `setup.sh` Automatiza la ejecución del proyecto.
+- `setup.sh` Automatiza la ejecución del pipeline y el dashboard.
 
 ## Instalación y ejecución automática (recomendada)
 
@@ -61,10 +87,12 @@ El proyecto incluye un script `setup.sh` que orquesta todo el flujo de principio
 ```bash
 git clone git@github.com:Ch3chS/geo_IceAgen-t.git
 cd geo_IceAgen-t
+git submodule update --init --recursive    # trae el motor snowmelt-rs
 chmod +x setup.sh
 ./setup.sh
 ```
 
+`setup.sh` crea el entorno, instala dependencias, corre el pipeline para **todos los glaciares** configurados en `scripts/glacier_config.py` (descarga → NDSI → clasificación → series → validación DGA) y, si `cargo` está disponible, compila y corre la Etapa 5b (snowmelt). Al final lanza el dashboard.
 
 ## Instalación para desarrollo (manual)
 
@@ -73,38 +101,57 @@ chmod +x setup.sh
 git clone git@github.com:Ch3chS/geo_IceAgen-t.git
 ```
 ### 2. Entra a la carpeta del código:
-
 ```bash
 cd geo_IceAgen-t
 ```
-### 3. Crea un entorno virtual:
+### 3. Trae el submódulo (motor snowmelt-rs):
+```bash
+git submodule update --init --recursive
+```
+### 4. Crea un entorno virtual:
 ```bash
 python -m venv .env
 ```
-### 4. Entra al entorno virtual:
+### 5. Entra al entorno virtual:
 ```bash
 source ./.env/bin/activate
 ```
-### 5. Instala las dependencias:
+### 6. Instala las dependencias:
 ```bash
 pip install -r requirements.txt
 ```
 
-### 6. Desarrolla y testea
-ya sea creación de archivos nuevos, depuración etc...
+### 7. Pipeline por glaciar
+Para cada glaciar (default: `echaurren`; también `juncal`):
 
-### 7. Verifica el funcionamiento de la aplicación central
+```bash
+python scripts/download_data.py    --glacier <slug>
+python scripts/process_data.py     --glacier <slug>
+python scripts/spatial_analysis.py --glacier <slug>
+python scripts/validar_dga.py      --glacier <slug>  
+python scripts/run_snowmelt.py     --glacier <slug> 
+```
+
+### 8. Desarrolla y testea
+ya sea creación de archivos nuevos, depuración etc... Los tests cubren las funciones puras:
+
+```bash
+pytest
+```
+
+### 9. Verifica el funcionamiento de la aplicación central
 Antes de hacer tu push ejecuta:
 ```bash
 streamlit run ./app/main.py
 ```
-desde la raiz del proyecto.
+desde la raiz del proyecto. En el sidebar elige el glaciar y la vista.
 
 ## Resultados esperados
 
-- Mapas de extensión glaciar por década (1985–2025)
-- Gráfico de retroceso.
-- Análisis de correlación glaciar-caudal.
-- Proyección simplificada.
+- Mapas de extensión glaciar por década (1985–2025).
+- Gráfico de retroceso y tasa por década.
+- Análisis de correlación glaciar-caudal (DGA).
+- Balance físico de masa simulado (snowmelt-rs).
+- Validación del área del pipeline contra el Inventario DGA (MAE, sesgo, IoU).
 
 *“El hielo se va, pero nosotros permaneceremos. Debemos cuidar nuestros recursos hídricos”*
