@@ -38,7 +38,7 @@ opcion = st.sidebar.radio(
     "Elige un dashboard:",
     ("Inicio", "NDSI Sentinel-2", "NDSI Landsat",
      "Clasificación", "Polígonos", "Retroceso", "Correlación DGA",
-     "Balance físico (snowmelt-rs)")
+     "Balance físico (snowmelt-rs)", "Validación DGA")
 )
 
 if opcion == "Inicio":
@@ -70,6 +70,10 @@ if opcion == "Inicio":
       físico (motor Rust `snowmelt-rs`) sobre el DEM y compara el
       derretimiento/escorrentía simulados contra el caudal DGA, junto con la
       altitud de la línea de equilibrio (ELA) estimada.
+    - **Validación DGA**: MAE de área y sesgo sistemático por sensor/año
+      contra el Inventario Público de Glaciares (IPG 2022), con mapa
+      comparativo de polígonos (DGA vs pipeline) y métricas de solape
+      espacial (IoU, omisión, comisión).
     """)
 
 elif opcion == "NDSI Sentinel-2":
@@ -99,6 +103,10 @@ elif opcion == "Correlación DGA":
 elif opcion == "Balance físico (snowmelt-rs)":
     from pages_.snowmelt import run_snowmelt
     run_snowmelt(glaciar)
+
+elif opcion == "Validación DGA":
+    from pages_.validacion_dga import run_validacion_dga
+    run_validacion_dga()
 
 else:
     st.info("Próximamente: nuevos dashboards para análisis glaciar.")
