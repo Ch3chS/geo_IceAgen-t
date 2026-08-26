@@ -1,0 +1,29 @@
+# Contexto de build: excluye todo lo pesado y lo que se monta como volumen.
+# Sin este archivo, `docker build` enviaría ~15 GB de rasteres al daemon.
+
+# Datos (se montan como volúmenes desde el host, ver docker-compose.yml)
+data/
+outputs/
+
+# Entorno virtual local (el contenedor trae el suyo)
+.env/
+
+# Build de Rust en el host: se recompila dentro de la etapa builder
+snowmelt-rs/target/
+
+# Caché de Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Git y metadatos
+.git/
+.gitignore
+.gitmodules
+
+# Logs y temporales del host
+*.log
+scratch_*.log
+
+# Documentación pesada
+*.pdf

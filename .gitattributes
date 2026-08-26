@@ -1,0 +1,6 @@
+# Los scripts que se ejecutan dentro de contenedores Linux deben conservar
+# finales de línea LF, incluso al hacer checkout en Windows (donde
+# core.autocrlf=true los convertiría a CRLF). Con CRLF, el contenedor falla con
+# "bad interpreter: No such file or directory" al ejecutar el entrypoint.
+*.sh        text eol=lf
+Dockerfile  text eol=lf

@@ -1,0 +1,48 @@
+# =============================================================================
+# geo_IceAgen-t — orquestación local
+#
+#   docker compose up -d              → dashboard en http://localhost:8501
+#   docker compose logs -f dashboard  → ver el log
+#   docker compose down               → bajar
+#
+# El pipeline NO corre solo: es un perfil aparte, porque re-descarga ~15 GB y
+# sobreescribe outputs/. Para lanzarlo explícitamente:
+#   docker compose run --rm pipeline                    (todos los glaciares)
+#   docker compose run --rm pipeline pipeline juncal    (uno solo)
+#
+# No se incluye PostGIS: el pipeline trabaja con rasteres y GeoPackage, no con
+# base de datos. El README menciona PostGIS como pendiente, no como dependencia.
+# =============================================================================
+
+name: geo_iceagent
+
+services:
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: geo-iceagent:latest
+    container_name: geo_iceagent_dashboard
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    volumes:
+      # Los datos viven en el host: 15 GB de rasteres no pueden ir en la imagen,
+      # y así el contenedor lee exactamente lo que ya está procesado.
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+    command: ["dashboard"]
+
+  # Mismo image que el dashboard, distinto comando. Solo se levanta si se pide
+  # con `--profile pipeline` o vía `docker compose run`.
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: geo-iceagent:latest
+    container_name: geo_iceagent_pipeline
+    profiles: ["pipeline"]
+    volumes:
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+    command: ["pipeline"]

@@ -67,7 +67,7 @@ Los directorios se explican mejor en READMEs dentro de cada directorio. Pero en 
 
 - `app/` Contiene la aplicación web (Streamlit) para mostrar el dashboard, con selector de glaciar.
 - `data/` Contiene los datos: crudos/procesados por glaciar, el Inventario IPG 2022 y el extracto DGA.
-- `docker/` Documentación de dockerización (PostGIS mencionado pero **no implementado**; `docker-compose.yml` está vacío).
+- `docker/` Entrypoint del contenedor y documentación de la dockerización.
 - `outputs/` Cuenta con los resultados por glaciar (`outputs/<slug>/`).
 - `scripts/` Cuenta con los scripts del pipeline.
 - `snowmelt-rs/` Submódulo Rust con el motor de balance de masa físico.
@@ -75,10 +75,34 @@ Los directorios se explican mejor en READMEs dentro de cada directorio. Pero en 
 
 Archivos en este directorio:
 - `.gitignore` Excluye los archivos pesados como rasteres etc.
-- `docker-compose.yml` Orquesta los contenedores (vacío — no usado).
+- `Dockerfile` Imagen del proyecto (build multi-etapa: Rust para snowmelt-cli + Python).
+- `.dockerignore` Excluye del contexto de build los datos pesados y lo que se monta.
+- `docker-compose.yml` Orquesta el dashboard (y el pipeline, en un perfil aparte).
 - `README.md` Describe el proyecto (es este archivo).
 - `requirements.txt` Dependencias para ejecutar el proyecto.
 - `setup.sh` Automatiza la ejecución del pipeline y el dashboard.
+
+## Ejecución con Docker (multiplataforma)
+
+Evita instalar el stack geoespacial y el toolchain de Rust a mano; funciona igual en Windows, macOS y Linux. Requiere **Docker Desktop abierto**.
+
+```bash
+git clone git@github.com:Ch3chS/geo_IceAgen-t.git
+cd geo_IceAgen-t
+git submodule update --init --recursive    # trae el motor snowmelt-rs
+docker compose up -d                       # dashboard en http://localhost:8501
+```
+
+La imagen trae `snowmelt-cli` ya compilado, así que la Etapa 5b funciona sin instalar Rust. `data/` y `outputs/` se montan desde el host: los ~15 GB de rasteres **no** van en la imagen, hay que generarlos (o tenerlos ya) en el repositorio clonado.
+
+Para correr el pipeline completo dentro del contenedor (⚠️ re-descarga ~15 GB y sobreescribe `outputs/`):
+
+```bash
+docker compose run --rm pipeline
+docker compose run --rm pipeline pipeline juncal    # o un solo glaciar
+```
+
+Detalles y otros subcomandos en [`docker/README.md`](docker/README.md).
 
 ## Instalación y ejecución automática (recomendada)
 

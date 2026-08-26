@@ -22,9 +22,10 @@ app/main.py + app/pages_/:  dashboard Streamlit (6 vistas)
 `setup.sh` encadena todo el pipeline y lanza el dashboard.
 
 ## Convención de coordenadas / CRS (tal como está en el código, no mezclar sin reproyectar explícitamente)
-El proyecto **no usa PostGIS** (está mencionado en `docker/README.md` pero sin
-implementar; `docker-compose.yml` está vacío). Se manejan dos sistemas de
-referencia distintos, cada uno en su etapa:
+El proyecto **no usa PostGIS**: trabaja con rasteres GeoTIFF y vectores
+GeoPackage sobre el sistema de archivos (la dockerización tampoco lo incluye,
+ver `docker/README.md`). Se manejan dos sistemas de referencia distintos, cada
+uno en su etapa:
 
 - `scripts/download_data.py`: bounding box en **WGS84, orden (lon, lat)**
   (convención STAC/GeoJSON) — ej. `AOI = (-70.15, -33.60, -70.11, -33.56)`.
